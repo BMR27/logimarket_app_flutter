@@ -132,110 +132,130 @@ class _BackpackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stateColor = AppColors.forBackpackState(backpack.state);
+    final canOpenDetails = backpack.state != 3;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => BackpackItemsScreen(
-              backpackId: backpack.id,
-              isAdmin: isAdmin,
-              backpackState: backpack.state,
-            ),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    backpack.nombreRepartidor,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: stateColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: stateColor.withOpacity(0.4)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: stateColor,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _stateName(backpack.state),
-                          style: TextStyle(
-                              color: stateColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ],
+        onTap: canOpenDetails
+            ? () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BackpackItemsScreen(
+                      backpackId: backpack.id,
+                      isAdmin: isAdmin,
+                      backpackState: backpack.state,
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: backpack.progressPercent,
-                backgroundColor: Colors.grey.shade200,
-                valueColor: AlwaysStoppedAnimation<Color>(stateColor),
-                borderRadius: BorderRadius.circular(4),
-                minHeight: 6,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${backpack.progressOrders}/${backpack.totalOrders} pedidos',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-
-              // Cambiar estado (solo admin)
-              if (isAdmin) ...[
-                const SizedBox(height: 12),
+                )
+            : () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('La mochila terminada no permite ver órdenes'),
+                  ),
+                );
+              },
+        child: Opacity(
+          opacity: canOpenDetails ? 1.0 : 0.75,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _StateButton(
-                        label: 'En Ruta',
-                        color: Colors.orange,
-                        onTap: () => context
-                            .read<BackpacksProvider>()
-                            .updateState(backpack.id, 2)),
-                    const SizedBox(width: 8),
-                    _StateButton(
-                        label: 'Terminada',
-                        color: Colors.green,
-                        onTap: () => context
-                            .read<BackpacksProvider>()
-                            .updateState(backpack.id, 3)),
-                    const SizedBox(width: 8),
-                    _StateButton(
-                        label: 'Cancelar',
-                        color: Colors.red,
-                        onTap: () => context
-                            .read<BackpacksProvider>()
-                            .updateState(backpack.id, 4)),
+                    Text(
+                      backpack.nombreRepartidor,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: stateColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: stateColor.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: stateColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _stateName(backpack.state),
+                            style: TextStyle(
+                                color: stateColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: backpack.progressPercent,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: AlwaysStoppedAnimation<Color>(stateColor),
+                  borderRadius: BorderRadius.circular(4),
+                  minHeight: 6,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${backpack.progressOrders}/${backpack.totalOrders} pedidos',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+
+                if (!canOpenDetails) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'No disponible: mochila terminada',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+
+                // Cambiar estado (solo admin)
+                if (isAdmin) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      _StateButton(
+                          label: 'En Ruta',
+                          color: Colors.orange,
+                          onTap: () => context
+                              .read<BackpacksProvider>()
+                              .updateState(backpack.id, 2)),
+                      const SizedBox(width: 8),
+                      _StateButton(
+                          label: 'Terminada',
+                          color: Colors.green,
+                          onTap: () => context
+                              .read<BackpacksProvider>()
+                              .updateState(backpack.id, 3)),
+                      const SizedBox(width: 8),
+                      _StateButton(
+                          label: 'Cancelar',
+                          color: Colors.red,
+                          onTap: () => context
+                              .read<BackpacksProvider>()
+                              .updateState(backpack.id, 4)),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
