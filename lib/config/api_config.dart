@@ -23,6 +23,7 @@ class ApiConfig {
   static String updateOrder(int id) => '$baseUrl/orders/$id';
   static String orderNotes(int id) => '$baseUrl/orders/$id/notes';
   static String orderPriceRequest(int id) => '$baseUrl/orders/$id/price-request';
+    static String orderStatusHistory(int id) => '$baseUrl/orders/$id/status-history';
   static String products(int idOrden) => '$baseUrl/products/$idOrden';
   static String productsSimple(int idOrden) => '$baseUrl/products/$idOrden/simple';
   static String search({String equipos = '', String folio = ''}) =>

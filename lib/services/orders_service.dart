@@ -65,4 +65,9 @@ class OrdersService extends ApiService {
     final data = await get(ApiConfig.products(idOrden)) as List;
     return data.map((e) => ProductModel.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  Future<List<Map<String, dynamic>>> getOrderStatusHistory(int idOrden) async {
+    final data = await get(ApiConfig.orderStatusHistory(idOrden)) as List;
+    return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
 }

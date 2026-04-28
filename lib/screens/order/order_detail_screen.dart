@@ -10,8 +10,10 @@ import '../../providers/auth_provider.dart';
 import '../../providers/map_navigation_provider.dart';
 import '../../config/api_config.dart';
 import '../../models/catalogs_model.dart';
+import '../../models/order_model.dart';
 import '../../services/catalogs_service.dart';
 import '../../services/api_service.dart';
+import '../../services/orders_service.dart';
 import 'delivery_evidence_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
@@ -24,6 +26,7 @@ class OrderDetailScreen extends StatefulWidget {
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   final _catalogsService = CatalogsService();
+  final _ordersService = OrdersService();
 
   List<MotivoStatusModel> _motivos = [];
   List<MotivoExplicacionModel> _explicaciones = [];
@@ -46,6 +49,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   // ── Evidencia de entrega ──────────────────────────────────────────────────
   Map<String, dynamic>? _evidencia;
   bool _loadingEvidencia = false;
+
+  // ── Historial de calificaciones ───────────────────────────────────────────
+  List<Map<String, dynamic>> _statusHistory = [];
+  bool _loadingStatusHistory = false;
 
   // Opciones de status de orden
   static const _statusOptions = [
@@ -73,6 +80,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     } catch (_) {}
     await _loadPriceRequest();
       await _loadEvidencia();
+    await _loadStatusHistory();
     if (mounted) {
       final order = context.read<OrdersProvider>().selectedOrder;
       if (order != null) {
@@ -109,6 +117,38 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) setState(() => _evidencia = null);
     }
     if (mounted) setState(() => _loadingEvidencia = false);
+  }
+
+  Future<void> _loadStatusHistory() async {
+    if (!mounted) return;
+    setState(() => _loadingStatusHistory = true);
+    try {
+      final data = await _ordersService.getOrderStatusHistory(widget.orderId);
+      if (mounted) setState(() => _statusHistory = data);
+    } catch (_) {
+      if (mounted) setState(() => _statusHistory = []);
+    }
+    if (mounted) setState(() => _loadingStatusHistory = false);
+  }
+
+  bool _hasIntento1Step(OrderModel? order) {
+    if (order == null) return false;
+    if (order.idStatus == 5 || order.idStatus == 6) return true;
+    return _statusHistory.any((h) {
+      final prev = (h['idStatusAnterior'] ?? 0) as int;
+      final next = (h['idStatusNuevo'] ?? 0) as int;
+      return prev == 5 || next == 5;
+    });
+  }
+
+  String _fmtHistoryDate(dynamic raw) {
+    final text = raw?.toString() ?? '';
+    if (text.isEmpty || text.length < 10) return '-';
+    final y = text.substring(0, 4);
+    final m = text.substring(5, 7);
+    final d = text.substring(8, 10);
+    final t = text.length >= 16 ? text.substring(11, 16) : '';
+    return t.isNotEmpty ? '$d/$m/$y $t' : '$d/$m/$y';
   }
 
   double _asDouble(dynamic value) {
@@ -200,9 +240,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _save() async {
     final auth = context.read<AuthProvider>();
+    final order = context.read<OrdersProvider>().selectedOrder;
     if (_selectedStatus == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecciona un status')),
+      );
+      return;
+    }
+    if (_selectedStatus == 6 && !_hasIntento1Step(order)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No puedes marcar Intento 2 sin haber pasado antes por Intento 1')),
       );
       return;
     }
@@ -483,6 +530,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final explicacionesFiltradas = _explicaciones
         .where((e) => e.idMotivo == _selectedMotivo)
         .toList();
+    final hasIntento1 = _hasIntento1Step(order);
 
     return Scaffold(
       appBar: AppBar(
@@ -693,15 +741,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 items: _statusOptions
                     .map((s) => DropdownMenuItem(
                           value: s['id'] as int,
+                          enabled: (s['id'] as int) != 6 || hasIntento1,
                           child: Text(s['name'] as String),
                         ))
                     .toList(),
-                onChanged: (v) => setState(() {
-                  _selectedStatus = v;
-                  _selectedMotivo = null;
-                  _selectedExplicacion = null;
-                }),
+                onChanged: (v) {
+                  if (v == 6 && !hasIntento1) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Primero debes pasar por Intento 1 antes de seleccionar Intento 2')),
+                    );
+                    return;
+                  }
+                  setState(() {
+                    _selectedStatus = v;
+                    _selectedMotivo = null;
+                    _selectedExplicacion = null;
+                  });
+                },
               ),
+              if (!hasIntento1)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Intento 2 estará disponible cuando esta orden haya pasado por Intento 1.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange),
+                  ),
+                ),
               const SizedBox(height: 12),
 
               // Motivo (condicional)
@@ -775,6 +840,37 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       )
                     : const Text('Guardar calificación'),
               ),
+            ]),
+
+            // ── Historial de calificaciones ─────────────────────────
+            _Section(title: 'Historial de calificaciones', children: [
+              if (_loadingStatusHistory)
+                const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: LinearProgressIndicator(),
+                )
+              else if (_statusHistory.isEmpty)
+                const Text('Aún no hay cambios de calificación registrados para esta orden.')
+              else
+                ..._statusHistory.map((h) {
+                  final anterior = (h['statusAnterior'] ?? '-').toString();
+                  final nuevo = (h['statusNuevo'] ?? '-').toString();
+                  final motivo = (h['motivoStatus'] ?? '').toString();
+                  final explicacion = (h['explicacionMotivo'] ?? '').toString();
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.history, size: 18),
+                    title: Text('$anterior → $nuevo'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_fmtHistoryDate(h['creationDate'])),
+                        if (motivo.isNotEmpty) Text('Motivo: $motivo'),
+                        if (explicacion.isNotEmpty) Text('Explicación: $explicacion'),
+                      ],
+                    ),
+                  );
+                }),
             ]),
           ],
         ),

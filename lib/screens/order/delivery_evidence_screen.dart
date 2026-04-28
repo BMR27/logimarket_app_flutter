@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,9 +33,9 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   );
 
   String? _fotoBase64;
+  String? _firmaBase64;
   bool _saving = false;
   bool _loadingExisting = true;
-  bool _saved = false;
   bool _pickingImage = false;
 
   String _normalizeBase64(String raw) {
@@ -71,7 +70,9 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         if (map['fotoBase64'] != null) {
           setState(() => _fotoBase64 = _normalizeBase64(map['fotoBase64'] as String));
         }
-        // La firma existente se muestra como imagen, no se recarga en el pad
+        if (map['firmaBase64'] != null) {
+          setState(() => _firmaBase64 = _normalizeBase64(map['firmaBase64'] as String));
+        }
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingExisting = false);
@@ -174,6 +175,8 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         firmaBase64 = base64Encode(pngBytes);
       }
     }
+    // Si no se dibujó una nueva firma, conservar la firma ya guardada.
+    firmaBase64 ??= _firmaBase64;
 
     try {
       final svc = ApiService();
@@ -184,7 +187,6 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         if (firmaBase64 != null) 'firmaBase64': firmaBase64,
       });
       if (mounted) {
-        setState(() => _saved = true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Evidencia guardada correctamente'),
@@ -213,6 +215,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   @override
   Widget build(BuildContext context) {
     final photoBytes = _safeDecodeBase64Image(_fotoBase64);
+    final firmaBytes = _safeDecodeBase64Image(_firmaBase64);
 
     return Scaffold(
       appBar: AppBar(
@@ -311,6 +314,31 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
                   // ── Firma del receptor ────────────────────────────
                   _SectionTitle(title: 'Firma del receptor'),
                   const SizedBox(height: 8),
+                  if (firmaBytes != null) ...[
+                    Text(
+                      'Firma guardada previamente',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.green),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.green.shade200),
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.green.shade50,
+                      ),
+                      child: Image.memory(
+                        firmaBytes,
+                        height: 80,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Text(
                     'El receptor debe firmar con el dedo en el área de abajo',
                     style: Theme.of(context)
@@ -339,7 +367,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(
                       icon: const Icon(Icons.refresh),
-                      label: const Text('Borrar firma'),
+                      label: const Text('Borrar trazo actual'),
                       onPressed: () => _signatureController.clear(),
                     ),
                   ),
