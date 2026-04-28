@@ -40,6 +40,26 @@ class _MapTabState extends State<MapTab> {
     }
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
+      // Obtener posición inmediata para centrar el mapa sin esperar el stream
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 10));
+        if (mounted) setState(() => _currentPosition = pos);
+        if (_mapController != null && !_locationCentered) {
+          _locationCentered = true;
+          _mapController!.animateCamera(
+            CameraUpdate.newCameraPosition(
+              CameraPosition(
+                target: LatLng(pos.latitude, pos.longitude),
+                zoom: 15,
+              ),
+            ),
+          );
+        }
+      } catch (_) {
+        // Si falla el fix rápido, el stream lo manejará
+      }
       _startLocationUpdates();
     }
   }
