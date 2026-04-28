@@ -167,6 +167,42 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
 
   Future<void> _pickFromGallery() async {
     if (_pickingImage) return;
+
+    final photosStatus = await Permission.photos.request();
+    if (!photosStatus.isGranted && !photosStatus.isLimited) {
+      if (photosStatus.isPermanentlyDenied || photosStatus.isRestricted) {
+        if (mounted) {
+          final openSettings = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Permiso de fotos bloqueado'),
+              content: const Text(
+                'Activa acceso a Fotos en Ajustes para cargar evidencia desde la galería.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Abrir Ajustes'),
+                ),
+              ],
+            ),
+          );
+          if (openSettings == true) {
+            await openAppSettings();
+          }
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permite acceso a Fotos para seleccionar imagen')),
+        );
+      }
+      return;
+    }
+
     final picker = ImagePicker();
     setState(() => _pickingImage = true);
     try {
@@ -175,10 +211,26 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         imageQuality: 70,
         maxWidth: 1200,
         maxHeight: 1200,
+        requestFullMetadata: false,
       );
       if (xFile == null) return;
       final bytes = await xFile.readAsBytes();
       setState(() => _fotoBase64 = base64Encode(bytes));
+    } on PlatformException catch (e) {
+      if (mounted) {
+        final message = e.message ?? '';
+        final isSandboxIssue = message.toLowerCase().contains('sandbox') ||
+            message.toLowerCase().contains('operation not permitted');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isSandboxIssue
+                  ? 'iOS bloqueó temporalmente el acceso a galería. Cierra y abre la app e intenta de nuevo.'
+                  : 'No se pudo abrir la galería. Intenta nuevamente.',
+            ),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _pickingImage = false);
     }
