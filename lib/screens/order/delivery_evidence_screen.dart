@@ -35,6 +35,20 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   bool _loadingExisting = true;
   bool _saved = false;
 
+  String _normalizeBase64(String raw) {
+    final withoutPrefix = raw.contains(',') ? raw.split(',').last : raw;
+    return withoutPrefix.replaceAll(RegExp(r'\s+'), '').trim();
+  }
+
+  Uint8List? _safeDecodeBase64Image(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      return base64Decode(_normalizeBase64(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +65,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
           _nombreCtrl.text = map['nombreReceptor'] as String;
         }
         if (map['fotoBase64'] != null) {
-          setState(() => _fotoBase64 = map['fotoBase64'] as String);
+          setState(() => _fotoBase64 = _normalizeBase64(map['fotoBase64'] as String));
         }
         // La firma existente se muestra como imagen, no se recarga en el pad
       }
@@ -115,7 +129,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
       await svc.post(ApiConfig.orderEvidencia(widget.orderId), {
         'idUsuario': widget.idUsuario,
         'nombreReceptor': nombre,
-        if (_fotoBase64 != null) 'fotoBase64': _fotoBase64,
+        if (_fotoBase64 != null) 'fotoBase64': _normalizeBase64(_fotoBase64!),
         if (firmaBase64 != null) 'firmaBase64': firmaBase64,
       });
       if (mounted) {
@@ -147,6 +161,8 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final photoBytes = _safeDecodeBase64Image(_fotoBase64);
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Evidencia — ${widget.folioOrden}'),
@@ -188,14 +204,28 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
                   // ── Foto del cliente ──────────────────────────────
                   _SectionTitle(title: 'Foto del cliente con paquete'),
                   const SizedBox(height: 8),
-                  if (_fotoBase64 != null)
+                  if (_fotoBase64 != null && photoBytes != null)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: Image.memory(
-                        base64Decode(_fotoBase64!),
+                        photoBytes,
                         height: 220,
                         width: double.infinity,
                         fit: BoxFit.cover,
+                      ),
+                    ),
+                  if (_fotoBase64 != null && photoBytes == null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: const Text(
+                        'No se pudo mostrar la foto guardada. Puedes retomar la foto para reemplazarla.',
+                        style: TextStyle(color: Colors.orange),
                       ),
                     ),
                   const SizedBox(height: 8),
