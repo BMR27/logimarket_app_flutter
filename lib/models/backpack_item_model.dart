@@ -40,7 +40,12 @@ class BackpackItemModel {
         idStatusOrden: _toInt(json['IdStatusOrden'] ?? json['idStatusOrden']),
         statusName: json['StatusName'] ?? json['statusName'] ?? '',
         nombreCliente: json['NombreCliente'] ?? json['nombreCliente'] ?? '',
-        validation: _toInt(json['Validation'] ?? json['validation']),
+      validation: _toInt(
+        json['Validation'] ??
+        json['validation'] ??
+        json['Validacion'] ??
+        json['validacion'],
+      ),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
       );
