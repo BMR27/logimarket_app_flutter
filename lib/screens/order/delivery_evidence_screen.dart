@@ -152,7 +152,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         );
       }
       if (Platform.isIOS) {
-        await _pickFromGallery();
+        await _pickFromGallery(ignoreLock: true);
       }
     } catch (_) {
       if (mounted) {
@@ -165,8 +165,8 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
     }
   }
 
-  Future<void> _pickFromGallery() async {
-    if (_pickingImage) return;
+  Future<void> _pickFromGallery({bool ignoreLock = false}) async {
+    if (_pickingImage && !ignoreLock) return;
 
     final photosStatus = await Permission.photos.request();
     if (!photosStatus.isGranted && !photosStatus.isLimited) {
@@ -204,7 +204,9 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
     }
 
     final picker = ImagePicker();
-    setState(() => _pickingImage = true);
+    if (!ignoreLock) {
+      setState(() => _pickingImage = true);
+    }
     try {
       final xFile = await picker.pickImage(
         source: ImageSource.gallery,
@@ -232,7 +234,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _pickingImage = false);
+      if (mounted && !ignoreLock) setState(() => _pickingImage = false);
     }
   }
 
