@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:signature/signature.dart';
 import '../../config/api_config.dart';
 import '../../services/api_service.dart';
@@ -82,43 +81,6 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
     if (_pickingImage) return;
     FocusScope.of(context).unfocus();
 
-    final cameraStatus = await Permission.camera.request();
-    if (!cameraStatus.isGranted) {
-      if (cameraStatus.isPermanentlyDenied || cameraStatus.isRestricted) {
-        if (mounted) {
-          final openSettings = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Permiso de cámara bloqueado'),
-              content: const Text(
-                'Activa el permiso de cámara en Ajustes para tomar foto. También puedes usar Galería.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Galería'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Abrir Ajustes'),
-                ),
-              ],
-            ),
-          );
-          if (openSettings == true) {
-            await openAppSettings();
-          } else {
-            await _pickFromGallery();
-          }
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permite acceso a la cámara para tomar foto')),
-        );
-      }
-      return;
-    }
-
     setState(() => _pickingImage = true);
     try {
       final bytes = await Navigator.push<Uint8List>(
@@ -151,41 +113,6 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
 
   Future<void> _pickFromGallery({bool ignoreLock = false}) async {
     if (_pickingImage && !ignoreLock) return;
-
-    final photosStatus = await Permission.photos.request();
-    if (!photosStatus.isGranted && !photosStatus.isLimited) {
-      if (photosStatus.isPermanentlyDenied || photosStatus.isRestricted) {
-        if (mounted) {
-          final openSettings = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Permiso de fotos bloqueado'),
-              content: const Text(
-                'Activa acceso a Fotos en Ajustes para cargar evidencia desde la galería.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Abrir Ajustes'),
-                ),
-              ],
-            ),
-          );
-          if (openSettings == true) {
-            await openAppSettings();
-          }
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permite acceso a Fotos para seleccionar imagen')),
-        );
-      }
-      return;
-    }
 
     final picker = ImagePicker();
     if (!ignoreLock) {
