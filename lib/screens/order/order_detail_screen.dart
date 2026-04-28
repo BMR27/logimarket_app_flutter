@@ -92,6 +92,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     if (mounted) setState(() => _loadingPriceRequest = false);
   }
 
+  double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value.replaceAll(',', '.')) ?? 0;
+    return 0;
+  }
+
   Future<void> _saveNotes() async {
     final notes = _notesCtrl.text.trim();
     setState(() { _savingNotes = true; _notesSaved = false; });
@@ -558,12 +564,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Precio solicitado: \$${(_priceRequest!['precioSolicitado'] as num).toStringAsFixed(2)}'),
+                      Text('Precio solicitado: \$${_asDouble(_priceRequest!['precioSolicitado']).toStringAsFixed(2)}'),
                       if ((_priceRequest!['motivoSolicitud'] ?? '').toString().isNotEmpty)
                         Text('Motivo: ${_priceRequest!['motivoSolicitud']}'),
                       if (_priceRequest!['totalAutorizado'] != null)
                         Text(
-                          'Precio autorizado: \$${(_priceRequest!['totalAutorizado'] as num).toStringAsFixed(2)}',
+                          'Precio autorizado: \$${_asDouble(_priceRequest!['totalAutorizado']).toStringAsFixed(2)}',
                           style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
                         ),
                     ],

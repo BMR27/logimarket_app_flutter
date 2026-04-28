@@ -32,6 +32,7 @@ class BackpacksProvider extends ChangeNotifier {
 
   Future<void> loadBackpackItems(int idBackpack) async {
     _loading = true;
+    _errorMessage = null;
     notifyListeners();
     try {
       _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
@@ -44,6 +45,7 @@ class BackpacksProvider extends ChangeNotifier {
 
   Future<void> loadDeliverItems(int idRepartidor) async {
     _loading = true;
+    _errorMessage = null;
     notifyListeners();
     try {
       _selectedItems = await _service.getBackpackItemsDeliver(idRepartidor);
@@ -107,7 +109,16 @@ class BackpacksProvider extends ChangeNotifier {
 
   Future<bool> validateItem(int idItem) async {
     try {
+      if (idItem <= 0) {
+        _errorMessage = 'No se pudo identificar el ítem a validar';
+        notifyListeners();
+        return false;
+      }
+
       await _service.validateBackpackItem(idItem);
+      
+      // Actualiza localmente SIN hacer reload del servidor
+      // Esto evita conflictos de estado y "Guardado Offline"
       final idx = _selectedItems.indexWhere((i) => i.idBackpackItem == idItem);
       if (idx >= 0) {
         final item = _selectedItems[idx];

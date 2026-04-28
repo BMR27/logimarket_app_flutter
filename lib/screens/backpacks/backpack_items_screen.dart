@@ -110,28 +110,46 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
       MaterialPageRoute(builder: (_) => const _QrScanScreen()),
     );
     if (result == null || !mounted) return;
+    final scannedFolio = result.trim();
 
     // Buscar el ítem por folio escaneado
     final items = context.read<BackpacksProvider>().selectedItems;
     final item = items.cast<BackpackItemModel?>().firstWhere(
-          (i) => i?.folioOrden == result,
+          (i) => i?.folioOrden.trim() == scannedFolio,
           orElse: () => null,
         );
 
     if (item == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Folio $result no encontrado en esta mochila')),
+        SnackBar(content: Text('Folio $scannedFolio no encontrado en esta mochila')),
       );
       return;
     }
 
-    await context.read<BackpacksProvider>().validateItem(item.idBackpackItem);
+    final ok = await context.read<BackpacksProvider>().validateItem(item.idBackpackItem);
+    if (!mounted) return;
+
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.read<BackpacksProvider>().errorMessage ?? 'No se pudo validar la orden',
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Orden $scannedFolio validada correctamente')),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<BackpacksProvider>();
     final items = _sortedItems(provider.selectedItems);
+    final canViewOrderInfo = widget.isAdmin || widget.backpackState != 1;
 
     final allValidated = items.isNotEmpty && items.every((i) => i.isValidated);
 
@@ -160,7 +178,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                       : 'Ordenar por distancia',
                   onPressed: _toggleSortByDistance,
                 ),
-          if (!widget.isAdmin)
+          if (!widget.isAdmin && canViewOrderInfo)
             IconButton(
               icon: const Icon(Icons.qr_code_scanner),
               tooltip: 'Escanear',
@@ -173,7 +191,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
           : Column(
               children: [
                 // Banner de orden activo
-                if (_sortByDistance)
+                if (_sortByDistance && canViewOrderInfo)
                   Container(
                     width: double.infinity,
                     color: const Color(0xFF1A73E8),
@@ -203,7 +221,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                   ),
 
                 // Progreso
-                if (provider.selectedItems.isNotEmpty)
+                if (provider.selectedItems.isNotEmpty && canViewOrderInfo)
                   LinearProgressIndicator(
                     value: provider.selectedItems
                             .where((i) => i.isValidated)
@@ -216,36 +234,54 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                   ),
 
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: items.length,
-                    itemBuilder: (_, i) {
-                      double? dist;
-                      if (_sortByDistance && _currentPosition != null) {
-                        final lat = double.tryParse(items[i].latitud ?? '');
-                        final lng = double.tryParse(items[i].longitud ?? '');
-                        if (lat != null && lng != null) {
-                          dist = _distanceTo(
-                            _currentPosition!.latitude,
-                            _currentPosition!.longitude,
-                            lat,
-                            lng,
-                          );
-                        }
-                      }
-                      return _ItemTile(
-                        item: items[i],
-                        isAdmin: widget.isAdmin,
-                        distance: dist != null
-                            ? _formatDistance(dist)
-                            : null,
-                        onDelete: widget.isAdmin
-                            ? () => provider
-                                .deleteItem(items[i].idBackpackItem)
-                            : null,
-                      );
-                    },
-                  ),
+                  child: canViewOrderInfo
+                      ? ListView.builder(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: items.length,
+                          itemBuilder: (_, i) {
+                            double? dist;
+                            if (_sortByDistance && _currentPosition != null) {
+                              final lat = double.tryParse(items[i].latitud ?? '');
+                              final lng = double.tryParse(items[i].longitud ?? '');
+                              if (lat != null && lng != null) {
+                                dist = _distanceTo(
+                                  _currentPosition!.latitude,
+                                  _currentPosition!.longitude,
+                                  lat,
+                                  lng,
+                                );
+                              }
+                            }
+                            return _ItemTile(
+                              item: items[i],
+                              isAdmin: widget.isAdmin,
+                              distance: dist != null
+                                  ? _formatDistance(dist)
+                                  : null,
+                              onDelete: widget.isAdmin
+                                  ? () => provider
+                                      .deleteItem(items[i].idBackpackItem)
+                                  : null,
+                            );
+                          },
+                        )
+                      : Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.lock_outline, size: 42, color: Colors.grey),
+                                SizedBox(height: 10),
+                                Text(
+                                  'Acepta la mochila para ver la información de las órdenes.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                 ),
 
                 // Botones de acción (solo mensajero)
@@ -282,6 +318,15 @@ class _ActionButtonsState extends State<_ActionButtons> {
   bool _loading = false;
 
   Future<void> _changeState(int newState) async {
+    if (newState == 3 && !widget.allValidated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debes validar todas las entregas antes de finalizar la mochila'),
+        ),
+      );
+      return;
+    }
+
     final label = newState == 2 ? 'aceptar' : 'finalizar';
     final confirmed = await showDialog<bool>(
       context: context,
@@ -302,10 +347,19 @@ class _ActionButtonsState extends State<_ActionButtons> {
     );
     if (confirmed != true || !mounted) return;
     setState(() => _loading = true);
-    await widget.provider.updateState(widget.backpackId, newState);
+    final updated = await widget.provider.updateState(widget.backpackId, newState);
     if (!mounted) return;
     setState(() => _loading = false);
-    Navigator.pop(context);
+    if (updated) {
+      Navigator.pop(context);
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(widget.provider.errorMessage ?? 'No se pudo actualizar la mochila'),
+      ),
+    );
   }
 
   @override
@@ -346,7 +400,7 @@ class _ActionButtonsState extends State<_ActionButtons> {
             minimumSize: const Size.fromHeight(48),
             backgroundColor: widget.allValidated ? Colors.green : Colors.orange,
           ),
-          onPressed: () => _changeState(3),
+          onPressed: widget.allValidated ? () => _changeState(3) : null,
         ),
       );
     }
@@ -371,22 +425,39 @@ class _ItemTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      color: item.isValidated 
+          ? Colors.green.shade50 
+          : Colors.white,
       child: ListTile(
+        tileColor: item.isValidated 
+            ? Colors.green.shade50 
+            : null,
         leading: CircleAvatar(
           backgroundColor:
-              item.isValidated ? Colors.green.shade50 : Colors.grey.shade100,
+              item.isValidated ? Colors.green.shade100 : Colors.grey.shade100,
           child: Icon(
-            item.isValidated ? Icons.check : Icons.pending,
+            item.isValidated ? Icons.check_circle : Icons.radio_button_unchecked,
             color: item.isValidated ? Colors.green : Colors.grey,
+            size: 24,
           ),
         ),
-        title: Text(item.folioOrden,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          item.folioOrden,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: item.isValidated ? Colors.green.shade700 : Colors.black,
+          ),
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(item.nombreCliente),
+            Text(
+              item.nombreCliente,
+              style: TextStyle(
+                color: item.isValidated ? Colors.green.shade600 : Colors.grey.shade700,
+              ),
+            ),
             if (distance != null)
               Row(
                 children: [
@@ -409,7 +480,10 @@ class _ItemTile extends StatelessWidget {
                 icon: const Icon(Icons.delete_outline, color: Colors.red),
                 onPressed: onDelete,
               )
-            : const Icon(Icons.chevron_right, color: Colors.grey),
+            : Icon(
+                Icons.chevron_right, 
+                color: item.isValidated ? Colors.green : Colors.grey,
+              ),
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(

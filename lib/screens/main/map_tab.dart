@@ -102,6 +102,40 @@ class _MapTabState extends State<MapTab> {
     );
   }
 
+  Future<void> _zoomToUserOnTripStart(LatLng? destination) async {
+    if (_mapController == null) return;
+
+    Position? pos = _currentPosition;
+
+    // Intenta refrescar ubicación para centrar con la posición más actual.
+    try {
+      pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(const Duration(seconds: 8));
+      if (mounted) {
+        setState(() => _currentPosition = pos);
+      }
+    } catch (_) {
+      // Si falla el fix inmediato, usa la última posición disponible.
+    }
+
+    if (pos == null) return;
+
+    if (destination != null) {
+      _animateNavCamera(pos, destination);
+      return;
+    }
+
+    _mapController!.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(pos.latitude, pos.longitude),
+          zoom: 17,
+        ),
+      ),
+    );
+  }
+
   double _bearing(double lat1, double lng1, double lat2, double lng2) {
     final la1 = lat1 * pi / 180;
     final la2 = lat2 * pi / 180;
@@ -275,9 +309,7 @@ class _MapTabState extends State<MapTab> {
               mapNav: mapNav,
               onStart: () {
                 context.read<MapNavigationProvider>().startNavigation();
-                if (_currentPosition != null) {
-                  _animateNavCamera(_currentPosition!, mapNav.destination!);
-                }
+                _zoomToUserOnTripStart(mapNav.destination);
               },
               onStop: () => context.read<MapNavigationProvider>().clearRoute(),
               onRecenter: () {

@@ -25,15 +25,22 @@ class BackpackItemModel {
 
   bool get isValidated => validation == 1;
 
+  static int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim()) ?? 0;
+    return 0;
+  }
+
   factory BackpackItemModel.fromJson(Map<String, dynamic> json) => BackpackItemModel(
-        idBackpack: (json['IdBackpack'] ?? json['idBackpack'] ?? 0) as int,
-        idBackpackItem: (json['IdBackPackItem'] ?? json['idBackpackItem'] ?? 0) as int,
-        idOrdenVenta: (json['IdOrdenVenta'] ?? json['idOrdenVenta'] ?? 0) as int,
+        idBackpack: _toInt(json['IdBackpack'] ?? json['idBackpack']),
+        idBackpackItem: _toInt(json['IdBackPackItem'] ?? json['IdBackpackItem'] ?? json['idBackpackItem']),
+        idOrdenVenta: _toInt(json['IdOrdenVenta'] ?? json['idOrdenVenta']),
         folioOrden: json['FolioOrden'] ?? json['folioOrden'] ?? '',
-        idStatusOrden: (json['IdStatusOrden'] ?? json['idStatusOrden'] ?? 0) as int,
+        idStatusOrden: _toInt(json['IdStatusOrden'] ?? json['idStatusOrden']),
         statusName: json['StatusName'] ?? json['statusName'] ?? '',
         nombreCliente: json['NombreCliente'] ?? json['nombreCliente'] ?? '',
-        validation: (json['Validation'] ?? json['validation'] ?? 0) as int,
+        validation: _toInt(json['Validation'] ?? json['validation']),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
       );
