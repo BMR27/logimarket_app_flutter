@@ -39,6 +39,7 @@ class ApiConfig {
       '$baseUrl/backpacks/deliver/$idRepartidor/items';
   static String deleteBackpackItem(int id) => '$baseUrl/backpacks/items/$id';
   static String validateBackpackItem(int id) => '$baseUrl/backpacks/items/$id/validate';
+    static String validateBackpackItemByFolio(int idBackpack) => '$baseUrl/backpacks/$idBackpack/items/validate-folio';
   static const String motivosStatus = '$baseUrl/catalogs/motivos-status';
   static const String explicacionesMotivo = '$baseUrl/catalogs/explicaciones-motivo';
   static const String adminReset = '$baseUrl/admin/reset';

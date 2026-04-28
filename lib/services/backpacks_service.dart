@@ -43,6 +43,15 @@ class BackpacksService extends ApiService {
     await put(ApiConfig.validateBackpackItem(idItem), {});
   }
 
+  Future<void> validateBackpackItemByFolio({
+    required int idBackpack,
+    required String folio,
+  }) async {
+    await put(ApiConfig.validateBackpackItemByFolio(idBackpack), {
+      'folio': folio,
+    });
+  }
+
   Future<List<Map<String, dynamic>>> searchOrders({
     required String equipos,
     required String folio,

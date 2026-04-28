@@ -126,7 +126,10 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
       return;
     }
 
-    final ok = await context.read<BackpacksProvider>().validateItem(item.idBackpackItem);
+    final ok = await context.read<BackpacksProvider>().validateItemByFolio(
+      idBackpack: widget.backpackId,
+      folio: scannedFolio,
+    );
     if (!mounted) return;
 
     if (!ok) {

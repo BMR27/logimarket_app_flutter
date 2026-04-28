@@ -142,6 +142,50 @@ class BackpacksProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> validateItemByFolio({
+    required int idBackpack,
+    required String folio,
+  }) async {
+    try {
+      final normalizedFolio = folio.trim();
+      if (idBackpack <= 0 || normalizedFolio.isEmpty) {
+        _errorMessage = 'Datos invalidos para validar la orden';
+        notifyListeners();
+        return false;
+      }
+
+      await _service.validateBackpackItemByFolio(
+        idBackpack: idBackpack,
+        folio: normalizedFolio,
+      );
+
+      final idx = _selectedItems.indexWhere(
+        (i) => i.idBackpack == idBackpack && i.folioOrden.trim() == normalizedFolio,
+      );
+
+      if (idx >= 0) {
+        final item = _selectedItems[idx];
+        _selectedItems[idx] = BackpackItemModel.fromJson({
+          'IdBackpack': item.idBackpack,
+          'IdBackPackItem': item.idBackpackItem,
+          'IdOrdenVenta': item.idOrdenVenta,
+          'FolioOrden': item.folioOrden,
+          'IdStatusOrden': item.idStatusOrden,
+          'StatusName': item.statusName,
+          'NombreCliente': item.nombreCliente,
+          'Validation': 1,
+        });
+        notifyListeners();
+      }
+
+      return true;
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Map<String, dynamic> _backpackToMap(BackpackModel b) => {
         'Id': b.id,
         'IdRepartidor': b.idRepartidor,
