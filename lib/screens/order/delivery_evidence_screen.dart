@@ -37,6 +37,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   bool _saving = false;
   bool _loadingExisting = true;
   bool _saved = false;
+  bool _pickingImage = false;
 
   String _normalizeBase64(String raw) {
     final withoutPrefix = raw.contains(',') ? raw.split(',').last : raw;
@@ -77,9 +78,39 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   }
 
   Future<void> _takePicture() async {
+    if (_pickingImage) return;
+    FocusScope.of(context).unfocus();
+
     final cameraStatus = await Permission.camera.request();
     if (!cameraStatus.isGranted) {
-      if (mounted) {
+      if (cameraStatus.isPermanentlyDenied || cameraStatus.isRestricted) {
+        if (mounted) {
+          final openSettings = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Permiso de cámara bloqueado'),
+              content: const Text(
+                'Activa el permiso de cámara en Ajustes para tomar foto. También puedes usar Galería.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Galería'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Abrir Ajustes'),
+                ),
+              ],
+            ),
+          );
+          if (openSettings == true) {
+            await openAppSettings();
+          } else {
+            await _pickFromGallery();
+          }
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Permite acceso a la cámara para tomar foto')),
         );
@@ -88,13 +119,26 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
     }
 
     final picker = ImagePicker();
+    setState(() => _pickingImage = true);
     try {
-      final xFile = await picker.pickImage(
+      XFile? xFile = await picker.pickImage(
         source: ImageSource.camera,
         imageQuality: 70,
         maxWidth: 1200,
         maxHeight: 1200,
       );
+
+      // Reintento único para error intermitente de AVFoundation en iOS.
+      if (xFile == null && Platform.isIOS) {
+        await Future.delayed(const Duration(milliseconds: 350));
+        xFile = await picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 70,
+          maxWidth: 1200,
+          maxHeight: 1200,
+        );
+      }
+
       if (xFile == null) return;
       final bytes = await xFile.readAsBytes();
       setState(() => _fotoBase64 = base64Encode(bytes));
@@ -116,20 +160,28 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
           const SnackBar(content: Text('No se pudo tomar la foto. Intenta de nuevo.')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _pickingImage = false);
     }
   }
 
   Future<void> _pickFromGallery() async {
+    if (_pickingImage) return;
     final picker = ImagePicker();
-    final xFile = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-      maxWidth: 1200,
-      maxHeight: 1200,
-    );
-    if (xFile == null) return;
-    final bytes = await xFile.readAsBytes();
-    setState(() => _fotoBase64 = base64Encode(bytes));
+    setState(() => _pickingImage = true);
+    try {
+      final xFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 1200,
+        maxHeight: 1200,
+      );
+      if (xFile == null) return;
+      final bytes = await xFile.readAsBytes();
+      setState(() => _fotoBase64 = base64Encode(bytes));
+    } finally {
+      if (mounted) setState(() => _pickingImage = false);
+    }
   }
 
   Future<void> _save() async {
@@ -268,14 +320,14 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.camera_alt),
                           label: Text(_fotoBase64 == null ? 'Tomar foto' : 'Retomar foto'),
-                          onPressed: _takePicture,
+                          onPressed: _pickingImage ? null : _takePicture,
                         ),
                       ),
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         icon: const Icon(Icons.photo_library_outlined),
                         label: const Text('Galería'),
-                        onPressed: _pickFromGallery,
+                        onPressed: _pickingImage ? null : _pickFromGallery,
                       ),
                     ],
                   ),
