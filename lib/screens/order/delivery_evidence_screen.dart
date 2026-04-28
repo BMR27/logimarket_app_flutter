@@ -1,15 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:signature/signature.dart';
 import '../../config/api_config.dart';
 import '../../services/api_service.dart';
+import 'camera_capture_screen.dart';
 
 class DeliveryEvidenceScreen extends StatefulWidget {
   final int orderId;
@@ -120,32 +119,15 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
       return;
     }
 
-    final picker = ImagePicker();
     setState(() => _pickingImage = true);
     try {
-      XFile? xFile = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 70,
-        maxWidth: 1200,
-        maxHeight: 1200,
+      final bytes = await Navigator.push<Uint8List>(
+        context,
+        MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
       );
-
-      // Reintento único para error intermitente de AVFoundation en iOS.
-      if (xFile == null && Platform.isIOS) {
-        await Future.delayed(const Duration(milliseconds: 350));
-        xFile = await picker.pickImage(
-          source: ImageSource.camera,
-          imageQuality: 70,
-          maxWidth: 1200,
-          maxHeight: 1200,
-        );
-      }
-
-      if (xFile == null) return;
-      final bytes = await xFile.readAsBytes();
+      if (bytes == null || bytes.isEmpty) return;
       setState(() => _fotoBase64 = base64Encode(bytes));
     } on PlatformException {
-      // iOS puede devolver errores AVFoundation temporales (-11819).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -235,50 +217,7 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
           ),
         );
       }
-      if (Platform.isIOS) {
-        await _pickFromFiles(ignoreLock: true);
-      }
-    } finally {
-      if (mounted && !ignoreLock) setState(() => _pickingImage = false);
-    }
-  }
-
-  Future<void> _pickFromFiles({bool ignoreLock = false}) async {
-    if (_pickingImage && !ignoreLock) return;
-    if (!ignoreLock) {
-      setState(() => _pickingImage = true);
-    }
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-        allowMultiple: false,
-      );
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.first;
-      Uint8List? bytes = file.bytes;
-      if (bytes == null && file.path != null) {
-        bytes = await File(file.path!).readAsBytes();
-      }
-      if (bytes == null || bytes.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo leer la imagen seleccionada')),
-          );
-        }
-        return;
-      }
-
-      if (mounted) {
-        setState(() => _fotoBase64 = base64Encode(bytes!));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo abrir el selector de archivos')),
-        );
-      }
+      // En iOS, si galería falla, el usuario aún puede usar la cámara embebida.
     } finally {
       if (mounted && !ignoreLock) setState(() => _pickingImage = false);
     }
