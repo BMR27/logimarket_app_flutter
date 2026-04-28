@@ -1,0 +1,305 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:signature/signature.dart';
+import '../../config/api_config.dart';
+import '../../services/api_service.dart';
+
+class DeliveryEvidenceScreen extends StatefulWidget {
+  final int orderId;
+  final int idUsuario;
+  final String folioOrden;
+
+  const DeliveryEvidenceScreen({
+    super.key,
+    required this.orderId,
+    required this.idUsuario,
+    required this.folioOrden,
+  });
+
+  @override
+  State<DeliveryEvidenceScreen> createState() => _DeliveryEvidenceScreenState();
+}
+
+class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
+  final _nombreCtrl = TextEditingController();
+  final _signatureController = SignatureController(
+    penStrokeWidth: 3,
+    penColor: Colors.black,
+    exportBackgroundColor: Colors.white,
+  );
+
+  String? _fotoBase64;
+  bool _saving = false;
+  bool _loadingExisting = true;
+  bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExisting();
+  }
+
+  Future<void> _loadExisting() async {
+    try {
+      final svc = ApiService();
+      final data = await svc.get(ApiConfig.orderEvidencia(widget.orderId));
+      if (data != null && mounted) {
+        final map = Map<String, dynamic>.from(data as Map);
+        if (map['nombreReceptor'] != null) {
+          _nombreCtrl.text = map['nombreReceptor'] as String;
+        }
+        if (map['fotoBase64'] != null) {
+          setState(() => _fotoBase64 = map['fotoBase64'] as String);
+        }
+        // La firma existente se muestra como imagen, no se recarga en el pad
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loadingExisting = false);
+  }
+
+  Future<void> _takePicture() async {
+    final picker = ImagePicker();
+    final xFile = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70,
+      maxWidth: 1200,
+      maxHeight: 1200,
+    );
+    if (xFile == null) return;
+    final bytes = await xFile.readAsBytes();
+    setState(() => _fotoBase64 = base64Encode(bytes));
+  }
+
+  Future<void> _pickFromGallery() async {
+    final picker = ImagePicker();
+    final xFile = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+      maxWidth: 1200,
+      maxHeight: 1200,
+    );
+    if (xFile == null) return;
+    final bytes = await xFile.readAsBytes();
+    setState(() => _fotoBase64 = base64Encode(bytes));
+  }
+
+  Future<void> _save() async {
+    final nombre = _nombreCtrl.text.trim();
+    if (nombre.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingresa el nombre de quien recibe')),
+      );
+      return;
+    }
+    if (_fotoBase64 == null && !_signatureController.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Agrega al menos una foto o la firma del receptor')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+
+    String? firmaBase64;
+    if (_signatureController.isNotEmpty) {
+      final Uint8List? pngBytes = await _signatureController.toPngBytes();
+      if (pngBytes != null) {
+        firmaBase64 = base64Encode(pngBytes);
+      }
+    }
+
+    try {
+      final svc = ApiService();
+      await svc.post(ApiConfig.orderEvidencia(widget.orderId), {
+        'idUsuario': widget.idUsuario,
+        'nombreReceptor': nombre,
+        if (_fotoBase64 != null) 'fotoBase64': _fotoBase64,
+        if (firmaBase64 != null) 'firmaBase64': firmaBase64,
+      });
+      if (mounted) {
+        setState(() => _saved = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Evidencia guardada correctamente'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al guardar: $e')),
+        );
+      }
+    }
+    if (mounted) setState(() => _saving = false);
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _signatureController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Evidencia — ${widget.folioOrden}'),
+        actions: [
+          IconButton(
+            icon: _saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.save),
+            onPressed: _saving ? null : _save,
+            tooltip: 'Guardar evidencia',
+          ),
+        ],
+      ),
+      body: _loadingExisting
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Nombre del receptor ───────────────────────────
+                  _SectionTitle(title: 'Nombre de quien recibe'),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _nombreCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      hintText: 'Nombre completo del receptor',
+                      prefixIcon: Icon(Icons.person_outline),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // ── Foto del cliente ──────────────────────────────
+                  _SectionTitle(title: 'Foto del cliente con paquete'),
+                  const SizedBox(height: 8),
+                  if (_fotoBase64 != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        base64Decode(_fotoBase64!),
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.camera_alt),
+                          label: Text(_fotoBase64 == null ? 'Tomar foto' : 'Retomar foto'),
+                          onPressed: _takePicture,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: const Text('Galería'),
+                        onPressed: _pickFromGallery,
+                      ),
+                    ],
+                  ),
+                  if (_fotoBase64 != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                        label: const Text('Eliminar foto', style: TextStyle(color: Colors.red)),
+                        onPressed: () => setState(() => _fotoBase64 = null),
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+
+                  // ── Firma del receptor ────────────────────────────
+                  _SectionTitle(title: 'Firma del receptor'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'El receptor debe firmar con el dedo en el área de abajo',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.white,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Signature(
+                        controller: _signatureController,
+                        height: 180,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Borrar firma'),
+                      onPressed: () => _signatureController.clear(),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  // ── Guardar ───────────────────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.check_circle_outline),
+                      label: const Text('Guardar evidencia de entrega'),
+                      onPressed: _saving ? null : _save,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  const _SectionTitle({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: Theme.of(context)
+          .textTheme
+          .titleSmall
+          ?.copyWith(fontWeight: FontWeight.bold, color: Colors.blue),
+    );
+  }
+}

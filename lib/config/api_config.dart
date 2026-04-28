@@ -43,5 +43,6 @@ class ApiConfig {
   static const String motivosStatus = '$baseUrl/catalogs/motivos-status';
   static const String explicacionesMotivo = '$baseUrl/catalogs/explicaciones-motivo';
   static const String adminReset = '$baseUrl/admin/reset';
-  static const String mapsApiKey = 'AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs';
+    static const String mapsApiKey = 'AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs';
+    static String orderEvidencia(int id) => '$baseUrl/orders/$id/evidencia';
 }

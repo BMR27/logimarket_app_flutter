@@ -12,6 +12,7 @@ import '../../config/api_config.dart';
 import '../../models/catalogs_model.dart';
 import '../../services/catalogs_service.dart';
 import '../../services/api_service.dart';
+import 'delivery_evidence_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
@@ -42,6 +43,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Map<String, dynamic>? _priceRequest;
   bool _loadingPriceRequest = false;
 
+  // ── Evidencia de entrega ──────────────────────────────────────────────────
+  Map<String, dynamic>? _evidencia;
+  bool _loadingEvidencia = false;
+
   // Opciones de status de orden
   static const _statusOptions = [
     {'id': 1, 'name': 'Exitosa'},
@@ -67,6 +72,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       _explicaciones = await _catalogsService.getExplicacionesMotivo();
     } catch (_) {}
     await _loadPriceRequest();
+      await _loadEvidencia();
     if (mounted) {
       final order = context.read<OrdersProvider>().selectedOrder;
       if (order != null) {
@@ -90,6 +96,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) setState(() => _priceRequest = null);
     }
     if (mounted) setState(() => _loadingPriceRequest = false);
+
+    Future<void> _loadEvidencia() async {
+      if (!mounted) return;
+      setState(() => _loadingEvidencia = true);
+      try {
+        final svc = ApiService();
+        final data = await svc.get(ApiConfig.orderEvidencia(widget.orderId));
+        if (mounted) setState(() => _evidencia = data != null ? Map<String, dynamic>.from(data as Map) : null);
+      } catch (_) {
+        if (mounted) setState(() => _evidencia = null);
+      }
+      if (mounted) setState(() => _loadingEvidencia = false);
+    }
   }
 
   double _asDouble(dynamic value) {
@@ -616,6 +635,59 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
             // ── Calificación ─────────────────────────────────────────
             _Section(title: 'Calificar entrega', children: [
+                          // ── Evidencia de entrega ──────────────────────────────────
+                          _Section(title: 'Evidencia de entrega', children: [
+                            if (_loadingEvidencia)
+                              const Padding(
+                                padding: EdgeInsets.all(8),
+                                child: LinearProgressIndicator(),
+                              )
+                            else if (_evidencia != null) ...[
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const CircleAvatar(
+                                  backgroundColor: Colors.green,
+                                  child: Icon(Icons.check, color: Colors.white, size: 20),
+                                ),
+                                title: Text(
+                                  _evidencia!['nombreReceptor'] ?? 'Evidencia guardada',
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                                subtitle: const Text('Foto y/o firma registradas'),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.photo_camera_outlined),
+                                label: Text(
+                                  _evidencia == null
+                                      ? 'Registrar foto y firma'
+                                      : 'Ver / actualizar evidencia',
+                                ),
+                                onPressed: () async {
+                                  final auth = context.read<AuthProvider>();
+                                  final order = context.read<OrdersProvider>().selectedOrder;
+                                  if (order == null || auth.user == null) return;
+                                  final updated = await Navigator.push<bool>(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => DeliveryEvidenceScreen(
+                                        orderId: widget.orderId,
+                                        idUsuario: auth.user!.idUsuario,
+                                        folioOrden: order.folioOrdenCliente,
+                                      ),
+                                    ),
+                                  );
+                                  if (updated == true) _loadEvidencia();
+                                },
+                              ),
+                            ),
+                          ]),
+
+                          // ── Calificación ─────────────────────────────────────────
+                          _Section(title: 'Calificar entrega', children: [
               // Status
               DropdownButtonFormField<int>(
                 value: _selectedStatus,
