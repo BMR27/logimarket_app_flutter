@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:signature/signature.dart';
@@ -231,6 +233,50 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
                   : 'No se pudo abrir la galería. Intenta nuevamente.',
             ),
           ),
+        );
+      }
+      if (Platform.isIOS) {
+        await _pickFromFiles(ignoreLock: true);
+      }
+    } finally {
+      if (mounted && !ignoreLock) setState(() => _pickingImage = false);
+    }
+  }
+
+  Future<void> _pickFromFiles({bool ignoreLock = false}) async {
+    if (_pickingImage && !ignoreLock) return;
+    if (!ignoreLock) {
+      setState(() => _pickingImage = true);
+    }
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+        allowMultiple: false,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        bytes = await File(file.path!).readAsBytes();
+      }
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo leer la imagen seleccionada')),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        setState(() => _fotoBase64 = base64Encode(bytes!));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo abrir el selector de archivos')),
         );
       }
     } finally {
