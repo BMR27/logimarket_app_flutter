@@ -40,27 +40,29 @@ class _MapTabState extends State<MapTab> {
     }
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
-      // Obtener posición inmediata para centrar el mapa sin esperar el stream
-      try {
-        final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        ).timeout(const Duration(seconds: 10));
-        if (mounted) setState(() => _currentPosition = pos);
-        if (_mapController != null && !_locationCentered) {
-          _locationCentered = true;
-          _mapController!.animateCamera(
-            CameraUpdate.newCameraPosition(
-              CameraPosition(
-                target: LatLng(pos.latitude, pos.longitude),
-                zoom: 15,
-              ),
-            ),
-          );
-        }
-      } catch (_) {
-        // Si falla el fix rápido, el stream lo manejará
-      }
       _startLocationUpdates();
+    }
+  }
+
+  Future<void> _centerOnUser() async {
+    try {
+      final pos = _currentPosition ??
+          await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          ).timeout(const Duration(seconds: 10));
+      if (!mounted || _mapController == null) return;
+      if (mounted) setState(() => _currentPosition = pos);
+      _locationCentered = true;
+      _mapController!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(pos.latitude, pos.longitude),
+            zoom: 15,
+          ),
+        ),
+      );
+    } catch (_) {
+      // Si falla, el stream lo manejará
     }
   }
 
@@ -261,21 +263,10 @@ class _MapTabState extends State<MapTab> {
           onMapCreated: (c) {
             _mapController = c;
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!_locationCentered && _currentPosition != null) {
-                // GPS ya llegó antes de que el mapa estuviera listo → centrar ahora
-                _locationCentered = true;
-                _mapController?.animateCamera(
-                  CameraUpdate.newCameraPosition(
-                    CameraPosition(
-                      target: LatLng(
-                          _currentPosition!.latitude,
-                          _currentPosition!.longitude),
-                      zoom: 15,
-                    ),
-                  ),
-                );
-              } else if (mapNav.routePoints.isNotEmpty) {
+              if (mapNav.routePoints.isNotEmpty) {
                 _animateToBounds(mapNav.routePoints);
+              } else if (!_locationCentered) {
+                _centerOnUser();
               }
             });
           },
