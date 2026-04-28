@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:signature/signature.dart';
 import '../../config/api_config.dart';
 import '../../services/api_service.dart';
@@ -74,16 +77,46 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
   }
 
   Future<void> _takePicture() async {
+    final cameraStatus = await Permission.camera.request();
+    if (!cameraStatus.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permite acceso a la cámara para tomar foto')),
+        );
+      }
+      return;
+    }
+
     final picker = ImagePicker();
-    final xFile = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 70,
-      maxWidth: 1200,
-      maxHeight: 1200,
-    );
-    if (xFile == null) return;
-    final bytes = await xFile.readAsBytes();
-    setState(() => _fotoBase64 = base64Encode(bytes));
+    try {
+      final xFile = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 70,
+        maxWidth: 1200,
+        maxHeight: 1200,
+      );
+      if (xFile == null) return;
+      final bytes = await xFile.readAsBytes();
+      setState(() => _fotoBase64 = base64Encode(bytes));
+    } on PlatformException {
+      // iOS puede devolver errores AVFoundation temporales (-11819).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('La cámara no está disponible por el momento. Se abrirá galería.'),
+          ),
+        );
+      }
+      if (Platform.isIOS) {
+        await _pickFromGallery();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo tomar la foto. Intenta de nuevo.')),
+        );
+      }
+    }
   }
 
   Future<void> _pickFromGallery() async {
