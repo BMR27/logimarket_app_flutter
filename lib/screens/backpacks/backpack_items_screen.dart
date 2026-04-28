@@ -26,10 +26,12 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
   bool _sortByDistance = false;
   Position? _currentPosition;
   bool _loadingLocation = false;
+  late int _currentBackpackState;
 
   @override
   void initState() {
     super.initState();
+    _currentBackpackState = widget.backpackState;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context
           .read<BackpacksProvider>()
@@ -152,7 +154,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<BackpacksProvider>();
     final items = _sortedItems(provider.selectedItems);
-    final canViewOrderInfo = widget.isAdmin || widget.backpackState != 1;
+    final canViewOrderInfo = widget.isAdmin || _currentBackpackState != 1;
 
     final allValidated = items.isNotEmpty && items.every((i) => i.isValidated);
 
@@ -181,7 +183,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                       : 'Ordenar por distancia',
                   onPressed: _toggleSortByDistance,
                 ),
-          if (!widget.isAdmin && canViewOrderInfo)
+          if (!widget.isAdmin && _currentBackpackState == 2)
             IconButton(
               icon: const Icon(Icons.qr_code_scanner),
               tooltip: 'Escanear',
@@ -291,9 +293,12 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                 if (!widget.isAdmin)
                   _ActionButtons(
                     backpackId: widget.backpackId,
-                    backpackState: widget.backpackState,
+                    backpackState: _currentBackpackState,
                     allValidated: allValidated,
                     provider: provider,
+                    onStateUpdated: (newState) {
+                      setState(() => _currentBackpackState = newState);
+                    },
                   ),
               ],
             ),
@@ -306,11 +311,13 @@ class _ActionButtons extends StatefulWidget {
   final int backpackState;
   final bool allValidated;
   final BackpacksProvider provider;
+  final ValueChanged<int>? onStateUpdated;
   const _ActionButtons({
     required this.backpackId,
     required this.backpackState,
     required this.allValidated,
     required this.provider,
+    this.onStateUpdated,
   });
 
   @override
@@ -354,7 +361,17 @@ class _ActionButtonsState extends State<_ActionButtons> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (updated) {
-      Navigator.pop(context);
+      widget.onStateUpdated?.call(newState);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newState == 2
+                ? 'Mochila aceptada correctamente'
+                : 'Mochila finalizada correctamente',
+          ),
+        ),
+      );
       return;
     }
 
