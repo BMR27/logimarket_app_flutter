@@ -234,7 +234,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final tracker = LocationTrackingService.instance;
     if (_enViaje) {
       // Detener viaje
-      tracker.updateTrip(idOrden: widget.orderId, enViaje: false);
+      await tracker.updateTrip(idOrden: widget.orderId, enViaje: false);
       setState(() => _enViaje = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Viaje finalizado'), backgroundColor: Colors.orange),
@@ -248,14 +248,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         }
 
         if (!tracker.isTracking) {
-          tracker.start(
+          await tracker.start(
             idMensajero: auth.user!.idUsuario,
             token: token,
             idOrden: widget.orderId,
             enViaje: true,
           );
         } else {
-          tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
+          await tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
         }
 
         setState(() => _enViaje = true);

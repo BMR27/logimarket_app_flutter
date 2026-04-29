@@ -45,19 +45,19 @@ class LocationTrackingService {
   /// [token]       — JWT para autenticar la petición
   /// [idOrden]     — Orden activa (opcional)
   /// [enViaje]     — true cuando el mensajero dio "Iniciar Viaje"
-  void start({
+  Future<void> start({
     required int idMensajero,
     required String token,
     int? idOrden,
     bool enViaje = false,
-  }) {
+  }) async {
     _idMensajero = idMensajero;
     _token = token;
     _idOrden = idOrden;
     _enViaje = enViaje;
 
     _timer?.cancel();
-    _sendNow(); // envío inmediato
+    await _sendNow(throwOnError: true); // envío inmediato obligatorio
     _timer = Timer.periodic(
       const Duration(seconds: intervalSeconds),
       (_) => _sendNow(),
@@ -66,23 +66,25 @@ class LocationTrackingService {
   }
 
   /// Actualiza la orden activa y el estado de viaje sin reiniciar el timer.
-  void updateTrip({int? idOrden, required bool enViaje}) {
+  Future<void> updateTrip({int? idOrden, required bool enViaje}) async {
     _idOrden = idOrden;
     _enViaje = enViaje;
-    _sendNow();
+    await _sendNow(throwOnError: true);
   }
 
   /// Detiene el tracking y notifica al backend que ya no está en viaje.
-  void stop() {
+  Future<void> stop() async {
     _timer?.cancel();
     _timer = null;
     _enViaje = false;
-    _sendNow(forceEnViaje: false); // último ping sin enViaje
+    try {
+      await _sendNow(forceEnViaje: false, throwOnError: false); // último ping sin enViaje
+    } catch (_) {}
     _idOrden = null;
     debugPrint('[LocationTracking] stopped');
   }
 
-  Future<void> _sendNow({bool? forceEnViaje}) async {
+  Future<void> _sendNow({bool? forceEnViaje, bool throwOnError = false}) async {
     if (_idMensajero == null || _token == null) return;
     try {
       await _ensureLocationReady();
@@ -118,7 +120,7 @@ class LocationTrackingService {
       debugPrint('[LocationTracking] sent ok lat=${pos.latitude} lng=${pos.longitude} enViaje=${body['enViaje']} idOrden=${body['idOrden']}');
     } catch (e) {
       debugPrint('[LocationTracking] send error: $e');
-      rethrow;
+      if (throwOnError) rethrow;
     }
   }
 }
