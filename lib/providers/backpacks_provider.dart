@@ -56,6 +56,47 @@ class BackpacksProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> loadMapItems({
+    required bool isAdmin,
+    required int userId,
+    int? idBackpack,
+    int? idRepartidor,
+  }) async {
+    _loading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      if (isAdmin) {
+        if (idBackpack == null) {
+          _selectedItems = [];
+          return;
+        }
+        _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
+        return;
+      }
+
+      final deliverItems = await _service.getBackpackItemsDeliver(idRepartidor ?? userId);
+
+      if (deliverItems.isNotEmpty) {
+        _selectedItems = deliverItems;
+        return;
+      }
+
+      // Fallback de contingencia cuando el endpoint deliver no devuelve datos.
+      if (idBackpack != null) {
+        _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
+      } else {
+        _selectedItems = deliverItems;
+      }
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> createBackpack({
     required int idRepartidor,
     required int idLider,

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/map_navigation_provider.dart';
+import '../../providers/backpacks_provider.dart';
 import '../../config/api_config.dart';
 import '../../models/catalogs_model.dart';
 import '../../models/order_model.dart';
@@ -317,7 +318,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         content: Text(ok ? 'Pedido actualizado' : 'Guardado offline'),
         backgroundColor: ok ? Colors.green : Colors.orange,
       ));
-      if (ok) Navigator.pop(context);
+      if (ok) {
+        await context.read<OrdersProvider>().loadOrders(auth.equiposForQuery);
+
+        final backpacksProvider = context.read<BackpacksProvider>();
+        final enRuta = backpacksProvider.backpacks.where((b) => b.state == 2).toList();
+        final primaryBackpack = enRuta.isNotEmpty
+            ? enRuta.first
+            : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
+        final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
+            auth.user?.type.toLowerCase() == 'lider';
+        await backpacksProvider.loadMapItems(
+          isAdmin: isAdmin,
+          userId: auth.user!.idUsuario,
+          idBackpack: primaryBackpack?.id,
+          idRepartidor: primaryBackpack?.idRepartidor,
+        );
+
+        if (mounted) Navigator.pop(context);
+      }
     }
   }
 

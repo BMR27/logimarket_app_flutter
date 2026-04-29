@@ -49,6 +49,20 @@ class _MainScreenState extends State<MainScreen> {
     await ordersProvider.loadOrders(auth.equiposForQuery);
     if (auth.user != null) {
       await backpacksProvider.loadBackpacks(auth.user!.idUsuario);
+      final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
+          auth.user?.type.toLowerCase() == 'lider';
+      final enRuta = backpacksProvider.backpacks.where((b) => b.state == 2).toList();
+      final primaryBackpack = enRuta.isNotEmpty
+          ? enRuta.first
+          : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
+      if (!isAdmin) {
+        await backpacksProvider.loadMapItems(
+          isAdmin: isAdmin,
+          userId: auth.user!.idUsuario,
+          idBackpack: primaryBackpack?.id,
+          idRepartidor: primaryBackpack?.idRepartidor,
+        );
+      }
     }
   }
 

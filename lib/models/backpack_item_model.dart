@@ -9,6 +9,12 @@ class BackpackItemModel {
   final int validation;
   final String? latitud;
   final String? longitud;
+  final String? calle;
+  final String? numExterior;
+  final String? colonia;
+  final String? municipio;
+  final String? estado;
+  final String? codigoPostal;
 
   BackpackItemModel({
     required this.idBackpack,
@@ -21,9 +27,26 @@ class BackpackItemModel {
     required this.validation,
     this.latitud,
     this.longitud,
+    this.calle,
+    this.numExterior,
+    this.colonia,
+    this.municipio,
+    this.estado,
+    this.codigoPostal,
   });
 
   bool get isValidated => validation == 1;
+
+  String get fullAddress {
+    final parts = [
+      if (calle != null && calle!.isNotEmpty) '${calle!} ${numExterior ?? ''}'.trim(),
+      if (colonia != null && colonia!.isNotEmpty) colonia!,
+      if (municipio != null && municipio!.isNotEmpty) municipio!,
+      if (estado != null && estado!.isNotEmpty) estado!,
+      if (codigoPostal != null && codigoPostal!.isNotEmpty) 'CP ${codigoPostal!}',
+    ];
+    return parts.join(', ');
+  }
 
   static int _toInt(dynamic value) {
     if (value is int) return value;
@@ -33,7 +56,7 @@ class BackpackItemModel {
   }
 
   factory BackpackItemModel.fromJson(Map<String, dynamic> json) => BackpackItemModel(
-        idBackpack: _toInt(json['IdBackpack'] ?? json['idBackpack']),
+      idBackpack: _toInt(json['IdBackPack'] ?? json['IdBackpack'] ?? json['idBackpack']),
         idBackpackItem: _toInt(json['IdBackPackItem'] ?? json['IdBackpackItem'] ?? json['idBackpackItem']),
         idOrdenVenta: _toInt(json['IdOrdenVenta'] ?? json['idOrdenVenta']),
         folioOrden: json['FolioOrden'] ?? json['folioOrden'] ?? '',
@@ -48,5 +71,11 @@ class BackpackItemModel {
       ),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
+        calle: json['Calle']?.toString() ?? json['calle']?.toString(),
+        numExterior: json['NumExterior']?.toString() ?? json['numExterior']?.toString(),
+        colonia: json['Colonia']?.toString() ?? json['colonia']?.toString(),
+        municipio: json['MunicipioDelegacion']?.toString() ?? json['municipio']?.toString(),
+        estado: json['Estado']?.toString() ?? json['estado']?.toString(),
+        codigoPostal: json['CodigoPostal']?.toString() ?? json['codigoPostal']?.toString(),
       );
 }
