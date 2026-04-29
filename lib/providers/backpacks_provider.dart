@@ -61,6 +61,7 @@ class BackpacksProvider extends ChangeNotifier {
     required int userId,
     int? idBackpack,
     int? idRepartidor,
+    List<int>? idBackpackIds,
   }) async {
     _loading = true;
     _errorMessage = null;
@@ -84,7 +85,18 @@ class BackpacksProvider extends ChangeNotifier {
       }
 
       // Fallback de contingencia cuando el endpoint deliver no devuelve datos.
-      if (idBackpack != null) {
+      if (idBackpackIds != null && idBackpackIds.isNotEmpty) {
+        final allItems = <BackpackItemModel>[];
+        for (final backpackId in idBackpackIds.toSet()) {
+          final items = await _service.getBackpackItemsAdmin(backpackId);
+          allItems.addAll(items);
+        }
+        final byItemId = <int, BackpackItemModel>{};
+        for (final item in allItems) {
+          byItemId[item.idBackpackItem] = item;
+        }
+        _selectedItems = byItemId.values.toList();
+      } else if (idBackpack != null) {
         _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
       } else {
         _selectedItems = deliverItems;

@@ -333,6 +333,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           userId: auth.user!.idUsuario,
           idBackpack: primaryBackpack?.id,
           idRepartidor: primaryBackpack?.idRepartidor,
+          idBackpackIds: enRuta.map((b) => b.id).toList(),
         );
 
         if (mounted) Navigator.pop(context);

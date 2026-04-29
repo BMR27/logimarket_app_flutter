@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart' as geo;
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../../providers/orders_provider.dart';
@@ -30,7 +31,7 @@ class _MapTabState extends State<MapTab> {
   bool _locationCentered = false; // Para centrar solo la primera vez al arrancar
   bool _loadingDeliverItems = false;
   bool _pinsFramed = false;
-  int? _loadedBackpackId;
+  String? _loadedEnRutaBackpacksKey;
   bool _resolvingMissingCoords = false;
   final Map<int, LatLng> _derivedCoordsByOrderId = {};
   final Map<int, int> _coordLookupAttemptsByOrderId = {};
@@ -322,6 +323,17 @@ class _MapTabState extends State<MapTab> {
 
   Future<LatLng?> _geocodeAddress(String query) async {
     try {
+      // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma)
+      try {
+        final locations = await geo.locationFromAddress(query);
+        if (locations.isNotEmpty) {
+          return LatLng(locations.first.latitude, locations.first.longitude);
+        }
+      } catch (_) {
+        // Fallback a proveedores HTTP
+      }
+
+      // 2) Google Geocoding API (si hay key disponible)
       final googleKey = ApiConfig.mapsApiKey.trim();
       if (googleKey.isNotEmpty) {
         final googleUri = Uri.parse(
@@ -345,6 +357,7 @@ class _MapTabState extends State<MapTab> {
         }
       }
 
+      // 3) Nominatim como último respaldo
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
         '?q=${Uri.encodeComponent(query)}&format=json&limit=1&countrycodes=mx',
@@ -464,16 +477,18 @@ class _MapTabState extends State<MapTab> {
         auth.user?.type.toLowerCase() == 'lider';
     final enRutaBackpacks = backpacks.backpacks.where((b) => b.state == 2).toList();
     final hasEnRutaBackpack = enRutaBackpacks.isNotEmpty;
+    final enRutaBackpackIds = enRutaBackpacks.map((b) => b.id).toSet();
+    final enRutaBackpacksKey = enRutaBackpackIds.toList()..sort();
+    final enRutaKey = enRutaBackpacksKey.join(',');
     final primaryBackpack = hasEnRutaBackpack
       ? enRutaBackpacks.first
       : (backpacks.backpacks.isNotEmpty ? backpacks.backpacks.first : null);
-    final enRutaBackpackId = hasEnRutaBackpack ? enRutaBackpacks.first.id : null;
     final targetBackpackId = primaryBackpack?.id;
     final pendingBackpackItems = hasEnRutaBackpack
       ? backpacks.selectedItems
-        .where((i) => i.idBackpack == enRutaBackpackId)
+        .where((i) => enRutaBackpackIds.contains(i.idBackpack))
         .toList()
-      : backpacks.selectedItems;
+      : <BackpackItemModel>[];
     final statusByOrderId = <int, int>{
       for (final o in orders) o.id: o.idStatus,
     };
@@ -518,9 +533,8 @@ class _MapTabState extends State<MapTab> {
     }
 
     if (!isAdmin &&
-        ((hasEnRutaBackpack && enRutaBackpackId != null &&
-                (_loadedBackpackId != enRutaBackpackId ||
-                    backpacks.selectedItems.where((i) => i.idBackpack == enRutaBackpackId).isEmpty)) ||
+        ((hasEnRutaBackpack &&
+                (_loadedEnRutaBackpacksKey != enRutaKey || pendingBackpackItems.isEmpty)) ||
             backpacks.selectedItems.isEmpty) &&
         !_loadingDeliverItems) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -533,10 +547,11 @@ class _MapTabState extends State<MapTab> {
                 isAdmin: isAdmin,
                 userId: userId,
                 idBackpack: targetBackpackId,
-          idRepartidor: idRepartidor,
+                idRepartidor: idRepartidor,
+                idBackpackIds: enRutaBackpackIds.toList(),
               );
         }
-        _loadedBackpackId = targetBackpackId;
+        _loadedEnRutaBackpacksKey = enRutaKey;
         _loadingDeliverItems = false;
       });
     }
@@ -669,7 +684,7 @@ class _MapTabState extends State<MapTab> {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              'Ruta:${hasEnRutaBackpack ? 'si' : 'no'} Bp:${enRutaBackpackId ?? 0} Pend:${pendingBackpackItems.length} Coord:${pendingWithCoords.length} Miss:${missingCoordsCount} Ok:${_coordResolvedCount} Err:${_coordFailedCount} Pins:${_markers.length}',
+              'Ruta:${hasEnRutaBackpack ? 'si' : 'no'} Bp:${enRutaBackpackIds.length} Pend:${pendingBackpackItems.length} Coord:${pendingWithCoords.length} Miss:${missingCoordsCount} Ok:${_coordResolvedCount} Err:${_coordFailedCount} Pins:${_markers.length}',
               style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),

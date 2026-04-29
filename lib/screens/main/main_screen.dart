@@ -61,6 +61,7 @@ class _MainScreenState extends State<MainScreen> {
           userId: auth.user!.idUsuario,
           idBackpack: primaryBackpack?.id,
           idRepartidor: primaryBackpack?.idRepartidor,
+          idBackpackIds: enRuta.map((b) => b.id).toList(),
         );
       }
     }
