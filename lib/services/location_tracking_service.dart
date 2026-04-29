@@ -23,6 +23,23 @@ class LocationTrackingService {
 
   static const int intervalSeconds = 10;
 
+  Future<void> _ensureLocationReady() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      throw Exception('Activa el GPS del dispositivo para iniciar viaje');
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      throw Exception('Permiso de ubicación denegado');
+    }
+  }
+
   /// Inicia el tracking.
   /// [idMensajero] — ID del usuario mensajero
   /// [token]       — JWT para autenticar la petición
@@ -68,6 +85,8 @@ class LocationTrackingService {
   Future<void> _sendNow({bool? forceEnViaje}) async {
     if (_idMensajero == null || _token == null) return;
     try {
+      await _ensureLocationReady();
+
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       ).timeout(const Duration(seconds: 8));
@@ -81,7 +100,7 @@ class LocationTrackingService {
         'enViaje': forceEnViaje ?? _enViaje,
       };
 
-      await http
+      final response = await http
           .post(
             Uri.parse(ApiConfig.ubicacion),
             headers: {
@@ -91,8 +110,15 @@ class LocationTrackingService {
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode >= 400) {
+        throw Exception('HTTP ${response.statusCode}: ${response.body}');
+      }
+
+      debugPrint('[LocationTracking] sent ok lat=${pos.latitude} lng=${pos.longitude} enViaje=${body['enViaje']} idOrden=${body['idOrden']}');
     } catch (e) {
       debugPrint('[LocationTracking] send error: $e');
+      rethrow;
     }
   }
 }

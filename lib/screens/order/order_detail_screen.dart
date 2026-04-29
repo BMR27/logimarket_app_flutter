@@ -230,7 +230,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  void _toggleViaje(AuthProvider auth) {
+  Future<void> _toggleViaje(AuthProvider auth) async {
     final tracker = LocationTrackingService.instance;
     if (_enViaje) {
       // Detener viaje
@@ -241,21 +241,33 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     } else {
       // Iniciar viaje — asegura que el tracker esté activo
-      final token = auth.token ?? '';
-      if (!tracker.isTracking) {
-        tracker.start(
-          idMensajero: auth.user!.idUsuario,
-          token: token,
-          idOrden: widget.orderId,
-          enViaje: true,
+      try {
+        final token = await ApiService.getToken() ?? '';
+        if (token.isEmpty || auth.user == null) {
+          throw Exception('Sesión inválida. Vuelve a iniciar sesión.');
+        }
+
+        if (!tracker.isTracking) {
+          tracker.start(
+            idMensajero: auth.user!.idUsuario,
+            token: token,
+            idOrden: widget.orderId,
+            enViaje: true,
+          );
+        } else {
+          tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
+        }
+
+        setState(() => _enViaje = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('¡Viaje iniciado! Tu ubicación se está enviando'), backgroundColor: Colors.green),
         );
-      } else {
-        tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo iniciar viaje: $e'), backgroundColor: Colors.red),
+        );
       }
-      setState(() => _enViaje = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('¡Viaje iniciado! Tu ubicación se está enviando'), backgroundColor: Colors.green),
-      );
     }
   }
 
@@ -607,7 +619,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           backgroundColor: _enViaje ? Colors.red.shade600 : Colors.green.shade700,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        onPressed: () => _toggleViaje(auth),
+                        onPressed: () async => _toggleViaje(auth),
                       );
                     },
                   ),
