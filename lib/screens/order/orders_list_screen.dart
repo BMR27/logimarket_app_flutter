@@ -4,6 +4,7 @@ import 'package:shimmer/shimmer.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/order_model.dart';
+import '../../services/location_tracking_service.dart';
 import 'order_detail_screen.dart';
 
 class OrdersListScreen extends StatefulWidget {
@@ -122,19 +123,47 @@ class _OrderCard extends StatelessWidget {
       case 3: return Colors.orange;
       case 4: return Colors.red;
       case 5: return Colors.purple;
+      case 7: return Colors.cyan.shade700; // On Delivery
       default: return Colors.grey;
     }
   }
 
+  bool get _isActiveDelivery {
+    final tracker = LocationTrackingService.instance;
+    return tracker.isTracking && tracker.enViaje && tracker.activeOrderId == order.id;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isActiveDelivery = _isActiveDelivery;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      color: isActiveDelivery ? Colors.cyan.shade50 : null,
+      shape: isActiveDelivery
+          ? RoundedRectangleBorder(
+              side: BorderSide(color: Colors.cyan.shade700, width: 2),
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       child: ListTile(
         contentPadding: const EdgeInsets.all(12),
-        leading: CircleAvatar(
-          backgroundColor: _statusColor(order.idStatus).withOpacity(0.15),
-          child: Icon(Icons.inventory_2, color: _statusColor(order.idStatus)),
+        leading: Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            CircleAvatar(
+              backgroundColor: _statusColor(order.idStatus).withOpacity(0.15),
+              child: Icon(Icons.inventory_2, color: _statusColor(order.idStatus)),
+            ),
+            if (isActiveDelivery)
+              const CircleAvatar(
+                radius: 7,
+                backgroundColor: Colors.white,
+                child: CircleAvatar(
+                  radius: 5,
+                  backgroundColor: Colors.cyan,
+                ),
+              ),
+          ],
         ),
         title: Text(
           order.folioOrdenCliente,
@@ -145,33 +174,51 @@ class _OrderCard extends StatelessWidget {
           children: [
             Text(order.cliente, maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: _statusColor(order.idStatus).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: _statusColor(order.idStatus).withOpacity(0.4)),
-              ),
-              child: Text(
-                order.statusOrden,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: _statusColor(order.idStatus),
-                  fontWeight: FontWeight.w600,
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _statusColor(order.idStatus).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _statusColor(order.idStatus).withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    order.statusOrden,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _statusColor(order.idStatus),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
-              ),
+                if (isActiveDelivery) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.cyan.shade700.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.location_on, size: 11, color: Colors.cyan.shade700),
+                        const SizedBox(width: 3),
+                        Text('En Viaje', style: TextStyle(fontSize: 11, color: Colors.cyan.shade700, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => OrderDetailScreen(orderId: order.id),
-          ),
-        ),
+          MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
+        ).then((_) => (context as Element).markNeedsBuild()),
       ),
     );
   }
-}

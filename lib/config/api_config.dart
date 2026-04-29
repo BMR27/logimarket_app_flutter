@@ -46,4 +46,8 @@ class ApiConfig {
   static const String adminReset = '$baseUrl/admin/reset';
     static const String mapsApiKey = 'AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs';
     static String orderEvidencia(int id) => '$baseUrl/orders/$id/evidencia';
+
+  // Ubicación en tiempo real
+  static const String ubicacion = '$baseUrl/ubicacion';
+  static String ubicacionMensajero(int id) => '$baseUrl/ubicacion/$id';
 }

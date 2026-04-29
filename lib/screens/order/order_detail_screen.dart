@@ -14,6 +14,7 @@ import '../../models/order_model.dart';
 import '../../services/catalogs_service.dart';
 import '../../services/api_service.dart';
 import '../../services/orders_service.dart';
+import '../../services/location_tracking_service.dart';
 import 'delivery_evidence_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
@@ -54,6 +55,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   List<Map<String, dynamic>> _statusHistory = [];
   bool _loadingStatusHistory = false;
 
+  // ── Tracking GPS (Iniciar Viaje) ──────────────────────────────────────────
+  bool _enViaje = false;
+
   // Opciones de status de orden
   static const _statusOptions = [
     {'id': 1, 'name': 'Exitosa'},
@@ -64,12 +68,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     {'id': 6, 'name': 'Intento 2'},
     {'id': 7, 'name': 'On Delivery'},
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
-  }
 
   Future<void> _loadData() async {
     final auth = context.read<AuthProvider>();
@@ -230,6 +228,45 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
+  }
+
+  void _toggleViaje(AuthProvider auth) {
+    final tracker = LocationTrackingService.instance;
+    if (_enViaje) {
+      // Detener viaje
+      tracker.updateTrip(idOrden: widget.orderId, enViaje: false);
+      setState(() => _enViaje = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Viaje finalizado'), backgroundColor: Colors.orange),
+      );
+    } else {
+      // Iniciar viaje — asegura que el tracker esté activo
+      final token = auth.token ?? '';
+      if (!tracker.isTracking) {
+        tracker.start(
+          idMensajero: auth.user!.idUsuario,
+          token: token,
+          idOrden: widget.orderId,
+          enViaje: true,
+        );
+      } else {
+        tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
+      }
+      setState(() => _enViaje = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('¡Viaje iniciado! Tu ubicación se está enviando'), backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Sincronizar estado de viaje con el tracker global
+    _enViaje = LocationTrackingService.instance.isTracking &&
+        LocationTrackingService.instance.enViaje &&
+        LocationTrackingService.instance.activeOrderId == widget.orderId;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
   }
 
   @override
@@ -554,6 +591,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 icon: Icons.location_on,
                 label: order.fullAddress,
                 onTap: () => _showNavigationOptions(order.latitud, order.longitud, order.fullAddress),
+              ),
+              // ── Botón Iniciar / Finalizar Viaje ─────────────────
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Builder(
+                    builder: (ctx) {
+                      final auth = ctx.read<AuthProvider>();
+                      return FilledButton.icon(
+                        icon: Icon(_enViaje ? Icons.stop_circle_outlined : Icons.play_circle_outlined),
+                        label: Text(_enViaje ? 'Finalizar Viaje' : 'Iniciar Viaje'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _enViaje ? Colors.red.shade600 : Colors.green.shade700,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => _toggleViaje(auth),
+                      );
+                    },
+                  ),
+                ),
               ),
               Row(
                 children: [
