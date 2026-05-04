@@ -25,19 +25,43 @@ class AuthProvider extends ChangeNotifier {
   String get equiposForQuery =>
       _equipos.map((e) => e.idEquipo.toString()).join(',');
 
+  Future<void> ensureEquiposLoaded() async {
+    if (_user == null || _equipos.isNotEmpty) return;
+    try {
+      _equipos = await _service.getEquipos(_user!.idUsuario);
+      notifyListeners();
+    } catch (_) {
+      // Evita romper la sesion; el consumidor decide como proceder si sigue vacio.
+    }
+  }
+
   Future<void> checkSession() async {
     try {
       final token = await ApiService.getToken();
       if (token != null) {
         _user = await _service.getSavedUser();
-        if (_user != null) {
+        if (_user == null) {
+          await _service.logout();
+          _state = AuthState.unauthenticated;
+        } else {
           try {
             _equipos = await _service.getEquipos(_user!.idUsuario);
+            _state = AuthState.authenticated;
+          } on ApiException catch (e) {
+            if (e.statusCode == 401 || e.statusCode == 403) {
+              await _service.logout();
+              _user = null;
+              _equipos = [];
+              _state = AuthState.unauthenticated;
+            } else {
+              _equipos = [];
+              _state = AuthState.authenticated;
+            }
           } catch (_) {
             _equipos = [];
+            _state = AuthState.authenticated;
           }
         }
-        _state = AuthState.authenticated;
       } else {
         _state = AuthState.unauthenticated;
       }

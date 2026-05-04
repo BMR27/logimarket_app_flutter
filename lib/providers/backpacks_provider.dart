@@ -9,42 +9,72 @@ class BackpacksProvider extends ChangeNotifier {
 
   List<BackpackModel> _backpacks = [];
   List<BackpackItemModel> _selectedItems = [];
-  bool _loading = false;
+  final Map<int, List<BackpackItemModel>> _itemsByBackpack = {};
+  int? _selectedBackpackId;
+  bool _loadingBackpacks = false;
+  bool _loadingItems = false;
   String? _errorMessage;
 
   List<BackpackModel> get backpacks => _backpacks;
   List<BackpackItemModel> get selectedItems => _selectedItems;
-  bool get loading => _loading;
+  bool get loading => _loadingBackpacks || _loadingItems;
+  bool get loadingBackpacks => _loadingBackpacks;
+  bool get loadingItems => _loadingItems;
   String? get errorMessage => _errorMessage;
 
   Future<void> loadBackpacks(int idUsuario) async {
-    _loading = true;
+    _loadingBackpacks = true;
     _errorMessage = null;
     notifyListeners();
     try {
-      _backpacks = await _service.getBackpacks(idUsuario);
+      final fetched = await _service.getBackpacks(idUsuario);
+      // Salvaguarda cliente: una mochila cerrada/cancelada (state=4) no debe mostrarse al mensajero.
+      _backpacks = fetched.where((b) => b.state != 4).toList();
     } on ApiException catch (e) {
       _errorMessage = e.message;
     }
-    _loading = false;
+    _loadingBackpacks = false;
     notifyListeners();
   }
 
   Future<void> loadBackpackItems(int idBackpack) async {
-    _loading = true;
+    final cached = _itemsByBackpack[idBackpack];
+    if (cached != null && cached.isNotEmpty) {
+      _selectedBackpackId = idBackpack;
+      _selectedItems = List<BackpackItemModel>.from(cached);
+      notifyListeners();
+      return;
+    }
+
+    _loadingItems = true;
     _errorMessage = null;
     notifyListeners();
     try {
-      _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
+      final fetched = await _service.getBackpackItemsAdmin(idBackpack);
+      _selectedBackpackId = idBackpack;
+      _selectedItems = fetched;
+      _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(fetched);
     } on ApiException catch (e) {
       _errorMessage = e.message;
     }
-    _loading = false;
+    _loadingItems = false;
     notifyListeners();
   }
 
+  Future<void> prefetchBackpackItems(int idBackpack) async {
+    final cached = _itemsByBackpack[idBackpack];
+    if (cached != null && cached.isNotEmpty) return;
+
+    try {
+      final fetched = await _service.getBackpackItemsAdmin(idBackpack);
+      _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(fetched);
+    } catch (_) {
+      // Prefetch silencioso: no interrumpe flujo de UI.
+    }
+  }
+
   Future<void> loadDeliverItems(int idRepartidor) async {
-    _loading = true;
+    _loadingItems = true;
     _errorMessage = null;
     notifyListeners();
     try {
@@ -52,7 +82,7 @@ class BackpacksProvider extends ChangeNotifier {
     } on ApiException catch (e) {
       _errorMessage = e.message;
     }
-    _loading = false;
+    _loadingItems = false;
     notifyListeners();
   }
 
@@ -63,7 +93,7 @@ class BackpacksProvider extends ChangeNotifier {
     int? idRepartidor,
     List<int>? idBackpackIds,
   }) async {
-    _loading = true;
+    _loadingItems = true;
     _errorMessage = null;
     notifyListeners();
 
@@ -104,7 +134,7 @@ class BackpacksProvider extends ChangeNotifier {
     } on ApiException catch (e) {
       _errorMessage = e.message;
     } finally {
-      _loading = false;
+      _loadingItems = false;
       notifyListeners();
     }
   }

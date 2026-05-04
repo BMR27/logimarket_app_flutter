@@ -4,11 +4,22 @@ import '../models/product_model.dart';
 import 'api_service.dart';
 
 class OrdersService extends ApiService {
+  List<dynamic> _ensureList(dynamic data, String endpointName) {
+    if (data is List) return data;
+    throw ApiException(
+      statusCode: -1,
+      message: 'Respuesta invalida del servidor en $endpointName',
+    );
+  }
+
   Future<List<OrderModel>> getOrders({
     required String equipos,
     String folio = '',
   }) async {
-    final data = await get(ApiConfig.orders(equipos: equipos, folio: folio)) as List;
+    final data = _ensureList(
+      await get(ApiConfig.orders(equipos: equipos, folio: folio)),
+      '/orders',
+    );
     return data.map((e) => OrderModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -17,9 +28,12 @@ class OrdersService extends ApiService {
     String folio = '',
     int lastId = 0,
   }) async {
-    final data = await get(
-      ApiConfig.ordersPaginated(equipos: equipos, folio: folio, lastId: lastId),
-    ) as List;
+    final data = _ensureList(
+      await get(
+        ApiConfig.ordersPaginated(equipos: equipos, folio: folio, lastId: lastId),
+      ),
+      '/orders/paginated',
+    );
     return data.map((e) => OrderModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -27,12 +41,22 @@ class OrdersService extends ApiService {
     required String equipos,
     String folio = '',
   }) async {
-    final data = await get(ApiConfig.ordersWays(equipos: equipos, folio: folio)) as List;
+    final data = _ensureList(
+      await get(ApiConfig.ordersWays(equipos: equipos, folio: folio)),
+      '/orders/ways',
+    );
     return data.map((e) => OrderModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<OrderModel> getOrderDetail(int id, {required String equipos}) async {
     final data = await get(ApiConfig.orderDetail(id, equipos: equipos));
+    return OrderModel.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Obtiene solo la dirección de una orden directamente de la tabla,
+  /// sin filtro de equipo — para geocodificar en el mapa.
+  Future<OrderModel> getOrderAddress(int id) async {
+    final data = await get(ApiConfig.orderAddress(id));
     return OrderModel.fromJson(data as Map<String, dynamic>);
   }
 
@@ -62,12 +86,15 @@ class OrdersService extends ApiService {
   }
 
   Future<List<ProductModel>> getProducts(int idOrden) async {
-    final data = await get(ApiConfig.products(idOrden)) as List;
+    final data = _ensureList(await get(ApiConfig.products(idOrden)), '/products/:idOrden');
     return data.map((e) => ProductModel.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<Map<String, dynamic>>> getOrderStatusHistory(int idOrden) async {
-    final data = await get(ApiConfig.orderStatusHistory(idOrden)) as List;
+    final data = _ensureList(
+      await get(ApiConfig.orderStatusHistory(idOrden)),
+      '/orders/:id/status-history',
+    );
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 }

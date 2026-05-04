@@ -1,10 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/map_navigation_provider.dart';
@@ -70,16 +66,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     {'id': 7, 'name': 'On Delivery'},
   ];
 
+  String _statusNameById(int id) {
+    final found = _statusOptions.where((s) => s['id'] == id).toList();
+    if (found.isNotEmpty) return (found.first['name'] as String).trim();
+    return 'Status $id';
+  }
+
   Future<void> _loadData() async {
     final auth = context.read<AuthProvider>();
     await context.read<OrdersProvider>().selectOrder(widget.orderId, auth.equiposForQuery);
-    try {
-      _motivos = await _catalogsService.getMotivosStatus();
-      _explicaciones = await _catalogsService.getExplicacionesMotivo();
-    } catch (_) {}
-    await _loadPriceRequest();
-      await _loadEvidencia();
-    await _loadStatusHistory();
+
     if (mounted) {
       final order = context.read<OrdersProvider>().selectedOrder;
       if (order != null) {
@@ -90,6 +86,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       }
       setState(() {});
     }
+
+    try {
+      final futures = <Future<void>>[
+        _loadPriceRequest(),
+        _loadEvidencia(),
+        _loadStatusHistory(),
+      ];
+
+      if (_motivos.isEmpty) {
+        futures.add(() async {
+          _motivos = await _catalogsService.getMotivosStatus();
+          _explicaciones = await _catalogsService.getExplicacionesMotivo();
+        }());
+      }
+
+      await Future.wait(futures);
+    } catch (_) {
+      // Se mantiene la pantalla funcional aunque fallen cargas secundarias.
+    }
+
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadPriceRequest() async {
@@ -134,13 +151,106 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     if (order == null) return false;
     if (order.idStatus == 5 || order.idStatus == 6) return true;
     return _statusHistory.any((h) {
-      final prev = (h['idStatusAnterior'] ?? 0) as int;
-      final next = (h['idStatusNuevo'] ?? 0) as int;
+      final prev = _toInt(h['idStatusAnterior'] ?? h['statusAnterior']);
+      final next = _toInt(h['idStatusNuevo'] ?? h['statusNuevo']);
       return prev == 5 || next == 5;
     });
   }
 
+  int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  DateTime? _historyDate(Map<String, dynamic> item) {
+    final raw = item['creationDate'] ?? item['fechaModificacion'];
+    if (raw == null) return null;
+    return DateTime.tryParse(raw.toString());
+  }
+
+  String _historyStatusLabel(dynamic statusTextOrId, dynamic idFallback) {
+    final text = statusTextOrId?.toString().trim() ?? '';
+    if (text.isNotEmpty && text != '-' && int.tryParse(text) == null) {
+      return text;
+    }
+    final id = _toInt(idFallback);
+    if (id > 0) return _statusNameById(id);
+    final numericFromText = int.tryParse(text);
+    if (numericFromText != null && numericFromText > 0) {
+      return _statusNameById(numericFromText);
+    }
+    return '-';
+  }
+
+  List<Map<String, dynamic>> _historyAscending() {
+    final sorted = List<Map<String, dynamic>>.from(_statusHistory);
+    sorted.sort((a, b) {
+      final da = _historyDate(a);
+      final db = _historyDate(b);
+      if (da == null && db == null) return 0;
+      if (da == null) return -1;
+      if (db == null) return 1;
+      return da.compareTo(db);
+    });
+    return sorted;
+  }
+
+  List<String> _inferredPathFromCurrentStatus(int idStatus) {
+    switch (idStatus) {
+      case 1:
+        return const ['Asignada', 'On Delivery', 'Exitosa'];
+      case 4:
+        return const ['Asignada', 'On Delivery', 'Cancelada'];
+      case 5:
+        return const ['Asignada', 'Intento 1'];
+      case 6:
+        return const ['Asignada', 'Intento 1', 'Intento 2'];
+      case 7:
+        return const ['Asignada', 'On Delivery'];
+      case 2:
+        return const ['Asignada'];
+      case 3:
+        return const ['Sin Asignar'];
+      default:
+        return [_statusNameById(idStatus)];
+    }
+  }
+
+  List<String> _statusPath(OrderModel order) {
+    if (_statusHistory.isEmpty) {
+      return _inferredPathFromCurrentStatus(order.idStatus);
+    }
+
+    final path = <String>[];
+    for (final h in _historyAscending()) {
+      final anterior = (h['statusAnterior'] ?? '').toString().trim();
+      final nuevo = (h['statusNuevo'] ?? '').toString().trim();
+
+      if (anterior.isNotEmpty && anterior != '-' && (path.isEmpty || path.last != anterior)) {
+        path.add(anterior);
+      }
+      if (nuevo.isNotEmpty && nuevo != '-' && (path.isEmpty || path.last != nuevo)) {
+        path.add(nuevo);
+      }
+    }
+
+    final current = order.statusOrden.trim();
+    if (current.isNotEmpty && (path.isEmpty || path.last != current)) {
+      path.add(current);
+    }
+
+    if (path.isEmpty) {
+      return _inferredPathFromCurrentStatus(order.idStatus);
+    }
+
+    return path;
+  }
+
   String _fmtHistoryDate(dynamic raw) {
+    if (raw is Map<String, dynamic>) {
+      return _fmtHistoryDate(raw['creationDate'] ?? raw['fechaModificacion']);
+    }
     final text = raw?.toString() ?? '';
     if (text.isEmpty || text.length < 10) return '-';
     final y = text.substring(0, 4);
@@ -241,6 +351,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         const SnackBar(content: Text('Viaje finalizado'), backgroundColor: Colors.orange),
       );
     } else {
+      final hasAnotherActiveTrip =
+          tracker.enViaje &&
+          tracker.activeOrderId != null &&
+          tracker.activeOrderId != widget.orderId;
+      if (hasAnotherActiveTrip) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Ya hay un viaje activo en la orden ${tracker.activeOrderId}. Finalizalo antes de iniciar otro.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
       // Iniciar viaje — asegura que el tracker esté activo
       try {
         final token = await ApiService.getToken() ?? '';
@@ -279,7 +405,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     _enViaje = LocationTrackingService.instance.isTracking &&
         LocationTrackingService.instance.enViaje &&
         LocationTrackingService.instance.activeOrderId == widget.orderId;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MapNavigationProvider>().clearRoute();
+      _loadData();
+    });
   }
 
   @override
@@ -304,15 +434,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return;
     }
     setState(() => _saving = true);
-    final ok = await context.read<OrdersProvider>().updateOrder(
-          idOrden: widget.orderId,
-          status: _selectedStatus!,
-          idUsuario: auth.user!.idUsuario,
-          motivoStatus: _selectedMotivo ?? 0,
-          explicacionMotivo: _selectedExplicacion ?? 0,
-          fechaReagenda: _fechaReagenda?.toIso8601String(),
-        );
+    bool ok = false;
+    String? saveError;
+    try {
+      ok = await context.read<OrdersProvider>().updateOrder(
+            idOrden: widget.orderId,
+            status: _selectedStatus!,
+            idUsuario: auth.user!.idUsuario,
+            motivoStatus: _selectedMotivo ?? 0,
+            explicacionMotivo: _selectedExplicacion ?? 0,
+            fechaReagenda: _fechaReagenda?.toIso8601String(),
+          );
+    } on ApiException catch (e) {
+      saveError = e.message;
+    } catch (e) {
+      saveError = 'No se pudo guardar la calificacion: $e';
+    }
     setState(() => _saving = false);
+
+    if (saveError != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(saveError), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(ok ? 'Pedido actualizado' : 'Guardado offline'),
@@ -354,6 +500,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   /// Muestra un bottom sheet con opciones de navegación
   Future<void> _showNavigationOptions(String? lat, String? lng, String address) async {
+    if (!_enViaje) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Primero debes iniciar viaje para abrir navegacion'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -376,23 +532,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Text(
-                  'Abrir con...',
+                  'Abrir navegacion con...',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                 ),
               ),
               const Divider(),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFF1A73E8),
-                  child: Icon(Icons.navigation, color: Colors.white, size: 20),
-                ),
-                title: const Text('Navegar en la app'),
-                subtitle: const Text('Ruta en el mapa de Logimarket'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _navigateInApp(lat, lng, address);
-                },
-              ),
               ListTile(
                 leading: const CircleAvatar(
                   backgroundColor: Color(0xFF4285F4),
@@ -450,118 +594,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _navigateInApp(String? lat, String? lng, String address) async {
-    double? destLat = double.tryParse(lat ?? '');
-    double? destLng = double.tryParse(lng ?? '');
-
-    // Si no hay coordenadas, geocodificar con Nominatim (OSM, sin API key)
-    if (destLat == null || destLng == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Buscando dirección en el mapa...')),
-        );
-      }
-
-      final order = context.read<OrdersProvider>().selectedOrder!;
-      final calleClean = _cleanStreet(order.calle);
-      final cp = order.codigoPostal.trim();
-      final colonia = order.colonia.trim();
-      final municipio = order.municipioDelegacion.trim();
-      final estado = order.estado.trim();
-      final numExt = order.numExterior.trim();
-
-      // Estrategia progresiva: de más específico a más general
-      // El CP de México es muy preciso (5 dígitos), priorizar siempre
-      final queries = [
-        // 1. CP + calle limpia + número (más preciso para México)
-        if (cp.isNotEmpty && calleClean.isNotEmpty && numExt.isNotEmpty)
-          '$calleClean $numExt, $cp, Mexico',
-        // 2. CP + calle + colonia
-        if (cp.isNotEmpty && calleClean.isNotEmpty)
-          '$calleClean, $cp $colonia, Mexico',
-        // 3. Calle completa + colonia + municipio + CP
-        if (calleClean.isNotEmpty)
-          '$calleClean $numExt, $colonia, $municipio, $estado, Mexico',
-        // 4. Solo CP + municipio (muy confiable en México)
-        if (cp.isNotEmpty && municipio.isNotEmpty)
-          '$cp $municipio, $estado, Mexico',
-        // 5. Colonia + municipio + estado
-        if (colonia.isNotEmpty)
-          '$colonia, $municipio, $estado, Mexico',
-        // 6. Solo municipio + estado (fallback final)
-        '$municipio, $estado, Mexico',
-      ];
-
-      for (final q in queries) {
-        try {
-          final uri = Uri.parse(
-            'https://nominatim.openstreetmap.org/search'
-            '?q=${Uri.encodeComponent(q)}'
-            '&format=json&limit=1&countrycodes=mx',
-          );
-          final response = await http.get(
-            uri,
-            headers: {'User-Agent': 'logimarket-app/1.0'},
-          );
-          if (response.statusCode == 200) {
-            final results = jsonDecode(response.body) as List;
-            if (results.isNotEmpty) {
-              destLat = double.tryParse(results[0]['lat'] as String);
-              destLng = double.tryParse(results[0]['lon'] as String);
-              if (destLat != null && destLng != null) break;
-            }
-          }
-        } catch (_) {}
-      }
-
-      if (destLat == null || destLng == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo encontrar la dirección en el mapa')),
-          );
-        }
-        return;
-      }
-    }
-
-    // Forzar posición GPS fresca (nunca usar posición en caché)
-    Position pos;
-    try {
-      pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 15));
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo obtener tu ubicación actual')),
-        );
-      }
-      return;
-    }
-
-    context.read<MapNavigationProvider>().setDestination(
-          LatLng(destLat, destLng),
-          LatLng(pos.latitude, pos.longitude),
-          address: address,
-        );
-
-    // Regresar hasta la pantalla principal para que el listener cambie el tab al mapa
-    Navigator.of(context).popUntil((route) => route.isFirst);
-  }
-
-  /// Elimina prefijos de tipo de calle (Calle., Cerrada., Cda., Av., etc.)
-  String _cleanStreet(String calle) {
-    return calle
-        .replaceAll(RegExp(r'^(Calle\.|Cerrada\.|Cda\.|Av\.|Blvd\.|Blvd |Calz\.|Col\.|Priv\.|Prol\.)\s*', caseSensitive: false), '')
-        .trim();
-  }
-
   @override
   Widget build(BuildContext context) {
     final ordersProvider = context.watch<OrdersProvider>();
     final order = ordersProvider.selectedOrder;
 
-    if (ordersProvider.loading) {
+    if (ordersProvider.loading && order == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (order == null) {
@@ -600,6 +638,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         .where((e) => e.idMotivo == _selectedMotivo)
         .toList();
     final hasIntento1 = _hasIntento1Step(order);
+    final isLockedBySuccess = order.idStatus == 1;
+    final historyItems = _historyAscending();
+    final statusPath = _statusPath(order);
 
     return Scaffold(
       appBar: AppBar(
@@ -622,7 +663,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               _InfoRow(
                 icon: Icons.location_on,
                 label: order.fullAddress,
-                onTap: () => _showNavigationOptions(order.latitud, order.longitud, order.fullAddress),
+                onTap: _enViaje
+                    ? () => _showNavigationOptions(
+                          order.latitud,
+                          order.longitud,
+                          order.fullAddress,
+                        )
+                    : null,
               ),
               // ── Botón Iniciar / Finalizar Viaje ─────────────────
               Padding(
@@ -904,10 +951,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 trailing: _fechaReagenda != null
                     ? IconButton(
                         icon: const Icon(Icons.clear),
-                        onPressed: () => setState(() => _fechaReagenda = null),
+                        onPressed: isLockedBySuccess
+                            ? null
+                            : () => setState(() => _fechaReagenda = null),
                       )
                     : null,
-                onTap: () async {
+                onTap: isLockedBySuccess
+                    ? null
+                    : () async {
                   final picked = await showDatePicker(
                     context: context,
                     initialDate: DateTime.now().add(const Duration(days: 1)),
@@ -917,6 +968,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   if (picked != null) setState(() => _fechaReagenda = picked);
                 },
               ),
+              if (isLockedBySuccess)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Reagenda bloqueada: la orden ya fue guardada como Exitosa.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
 
               const SizedBox(height: 16),
               ElevatedButton(
@@ -939,13 +998,38 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   padding: EdgeInsets.all(8),
                   child: LinearProgressIndicator(),
                 )
-              else if (_statusHistory.isEmpty)
-                const Text('Aún no hay cambios de calificación registrados para esta orden.')
-              else
-                ..._statusHistory.map((h) {
-                  final anterior = (h['statusAnterior'] ?? '-').toString();
-                  final nuevo = (h['statusNuevo'] ?? '-').toString();
-                  final motivo = (h['motivoStatus'] ?? '').toString();
+              else ...[
+                if (statusPath.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: statusPath
+                          .map((s) => Chip(label: Text(s), visualDensity: VisualDensity.compact))
+                          .toList(),
+                    ),
+                  ),
+                if (historyItems.isEmpty)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.history, size: 18),
+                    title: Text(
+                      'Estado actual: ${order.statusOrden.trim().isNotEmpty ? order.statusOrden : _statusNameById(order.idStatus)}',
+                    ),
+                    subtitle: const Text('No hay transiciones guardadas; mostrando flujo por status actual.'),
+                  )
+                else
+                  ...historyItems.map((h) {
+                  final anterior = _historyStatusLabel(
+                    h['statusAnterior'],
+                    h['idStatusAnterior'] ?? h['statusAnterior'],
+                  );
+                  final nuevo = _historyStatusLabel(
+                    h['statusNuevo'],
+                    h['idStatusNuevo'] ?? h['statusNuevo'],
+                  );
+                  final motivo = (h['motivoStatus'] ?? h['motivoCambio'] ?? '').toString();
                   final explicacion = (h['explicacionMotivo'] ?? '').toString();
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -954,13 +1038,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_fmtHistoryDate(h['creationDate'])),
+                        Text('Fecha modificación: ${_fmtHistoryDate(h)}'),
                         if (motivo.isNotEmpty) Text('Motivo: $motivo'),
                         if (explicacion.isNotEmpty) Text('Explicación: $explicacion'),
                       ],
                     ),
                   );
                 }),
+              ],
             ]),
           ],
         ),

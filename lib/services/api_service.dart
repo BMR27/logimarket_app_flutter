@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -21,42 +22,112 @@ class ApiService {
   }
 
   Future<dynamic> get(String url) async {
-    final response = await http.get(Uri.parse(url), headers: await _headers());
-    return _handleResponse(response);
+    try {
+      final response = await http.get(Uri.parse(url), headers: await _headers());
+      return _handleResponse(response);
+    } on SocketException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'Sin conexion a internet',
+      );
+    } on http.ClientException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'No se pudo conectar con el servidor',
+      );
+    }
   }
 
   Future<dynamic> post(String url, Map<String, dynamic> body) async {
-    final response = await http.post(
-      Uri.parse(url),
-      headers: await _headers(),
-      body: jsonEncode(body),
-    );
-    return _handleResponse(response);
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: await _headers(),
+        body: jsonEncode(body),
+      );
+      return _handleResponse(response);
+    } on SocketException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'Sin conexion a internet',
+      );
+    } on http.ClientException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'No se pudo conectar con el servidor',
+      );
+    }
   }
 
   Future<dynamic> put(String url, Map<String, dynamic> body) async {
-    final response = await http.put(
-      Uri.parse(url),
-      headers: await _headers(),
-      body: jsonEncode(body),
-    );
-    return _handleResponse(response);
+    try {
+      final response = await http.put(
+        Uri.parse(url),
+        headers: await _headers(),
+        body: jsonEncode(body),
+      );
+      return _handleResponse(response);
+    } on SocketException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'Sin conexion a internet',
+      );
+    } on http.ClientException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'No se pudo conectar con el servidor',
+      );
+    }
   }
 
   Future<dynamic> delete(String url) async {
-    final response = await http.delete(Uri.parse(url), headers: await _headers());
-    return _handleResponse(response);
+    try {
+      final response = await http.delete(Uri.parse(url), headers: await _headers());
+      return _handleResponse(response);
+    } on SocketException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'Sin conexion a internet',
+      );
+    } on http.ClientException {
+      throw ApiException(
+        statusCode: 0,
+        message: 'No se pudo conectar con el servidor',
+      );
+    }
   }
 
   dynamic _handleResponse(http.Response response) {
     final body = utf8.decode(response.bodyBytes);
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return jsonDecode(body);
+    dynamic parsed;
+    if (body.trim().isNotEmpty) {
+      try {
+        parsed = jsonDecode(body);
+      } catch (_) {
+        parsed = body;
+      }
     }
-    final errorJson = jsonDecode(body);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (parsed is String) {
+        throw ApiException(
+          statusCode: -1,
+          message: 'Respuesta invalida del servidor',
+        );
+      }
+      return parsed;
+    }
+
+    String message = 'Error del servidor (${response.statusCode})';
+    if (parsed is Map<String, dynamic> && parsed['error'] != null) {
+      message = parsed['error'].toString();
+    } else if (parsed is String && parsed.trim().isNotEmpty) {
+      message = parsed.trim();
+    }
+
     throw ApiException(
       statusCode: response.statusCode,
-      message: errorJson['error'] ?? 'Error desconocido',
+      message: message,
     );
   }
 }

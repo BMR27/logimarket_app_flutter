@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../providers/backpacks_provider.dart';
@@ -25,7 +26,7 @@ class _BackpacksScreenState extends State<BackpacksScreen> {
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () => provider.loadBackpacks(auth.user!.idUsuario),
-        child: provider.loading
+        child: provider.loadingBackpacks
             ? _buildShimmer()
             : provider.errorMessage != null
                 ? ListView(
@@ -124,7 +125,7 @@ class _BackpackCard extends StatelessWidget {
       case 1: return 'Asignada';
       case 2: return 'En Ruta';
       case 3: return 'Terminada';
-      case 4: return 'Cancelada';
+      case 4: return 'Cerrada';
       default: return 'Desconocido';
     }
   }
@@ -139,7 +140,11 @@ class _BackpackCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: canOpenDetails
-            ? () => Navigator.push(
+            ? () {
+                unawaited(
+                  context.read<BackpacksProvider>().prefetchBackpackItems(backpack.id),
+                );
+                Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => BackpackItemsScreen(
@@ -148,7 +153,8 @@ class _BackpackCard extends StatelessWidget {
                       backpackState: backpack.state,
                     ),
                   ),
-                )
+                );
+              }
             : () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(

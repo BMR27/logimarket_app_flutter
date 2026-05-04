@@ -18,6 +18,14 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+  int _prevIndex = 0;
+
+  bool _isAdminOrLeader(AuthProvider auth) {
+    final type = auth.user?.type.toLowerCase() ?? '';
+    return type == 'admin' || type == 'lider';
+  }
+
+  bool _isActiveBackpackState(int state) => state == 1 || state == 2;
 
   @override
   void initState() {
@@ -46,14 +54,16 @@ class _MainScreenState extends State<MainScreen> {
     final ordersProvider = context.read<OrdersProvider>();
     final backpacksProvider = context.read<BackpacksProvider>();
 
+    await auth.ensureEquiposLoaded();
     await ordersProvider.loadOrders(auth.equiposForQuery);
     if (auth.user != null) {
       await backpacksProvider.loadBackpacks(auth.user!.idUsuario);
-      final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
-          auth.user?.type.toLowerCase() == 'lider';
-      final enRuta = backpacksProvider.backpacks.where((b) => b.state == 2).toList();
-      final primaryBackpack = enRuta.isNotEmpty
-          ? enRuta.first
+      final isAdmin = _isAdminOrLeader(auth);
+      final activeBackpacks = backpacksProvider.backpacks
+          .where((b) => _isActiveBackpackState(b.state))
+          .toList();
+      final primaryBackpack = activeBackpacks.isNotEmpty
+          ? activeBackpacks.first
           : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
       if (!isAdmin) {
         await backpacksProvider.loadMapItems(
@@ -61,10 +71,56 @@ class _MainScreenState extends State<MainScreen> {
           userId: auth.user!.idUsuario,
           idBackpack: primaryBackpack?.id,
           idRepartidor: primaryBackpack?.idRepartidor,
-          idBackpackIds: enRuta.map((b) => b.id).toList(),
+          idBackpackIds: activeBackpacks.map((b) => b.id).toList(),
         );
       }
     }
+  }
+
+  Future<void> _reloadOrders() async {
+    final auth = context.read<AuthProvider>();
+    final ordersProvider = context.read<OrdersProvider>();
+    final backpacksProvider = context.read<BackpacksProvider>();
+    await auth.ensureEquiposLoaded();
+
+    if (!mounted) return;
+
+    if (auth.user != null && !_isAdminOrLeader(auth)) {
+      await backpacksProvider.loadBackpacks(auth.user!.idUsuario);
+      if (!mounted) return;
+      final activeBackpacks = backpacksProvider.backpacks
+          .where((b) => _isActiveBackpackState(b.state))
+          .toList();
+
+      if (activeBackpacks.isEmpty) {
+        await ordersProvider.loadOrdersByIds(auth.equiposForQuery, const <int>[]);
+        return;
+      }
+
+      if (activeBackpacks.isNotEmpty) {
+        await backpacksProvider.loadMapItems(
+          isAdmin: false,
+          userId: auth.user!.idUsuario,
+          idBackpack: activeBackpacks.first.id,
+          idRepartidor: activeBackpacks.first.idRepartidor,
+          idBackpackIds: activeBackpacks.map((b) => b.id).toList(),
+        );
+      }
+
+      final activeBackpackIds = activeBackpacks.map((b) => b.id).toSet();
+      final activeOrderIds = backpacksProvider.selectedItems
+          .where((i) => activeBackpackIds.contains(i.idBackpack))
+          .map((i) => i.idOrdenVenta)
+          .where((id) => id > 0)
+          .toSet()
+          .toList();
+
+      await ordersProvider.loadOrdersByIds(auth.equiposForQuery, activeOrderIds);
+      return;
+    }
+
+    if (!mounted) return;
+    await ordersProvider.loadOrders(auth.equiposForQuery);
   }
 
   @override
@@ -113,13 +169,25 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ],
       ),
-      body: tabs[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: tabs,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
-        destinations: const [
+        onDestinationSelected: (i) {
+          setState(() {
+            _prevIndex = _currentIndex;
+            _currentIndex = i;
+          });
+          // Tab Entregas (index 1): recargar datos al entrar
+          if (i == 1 && _prevIndex != 1) {
+            _reloadOrders();
+          }
+        },
+      destinations: const [
           NavigationDestination(icon: Icon(Icons.map), label: 'Mapa'),
-          NavigationDestination(icon: Icon(Icons.list_alt), label: 'Pedidos'),
+          NavigationDestination(icon: Icon(Icons.list_alt), label: 'Entregas'),
           NavigationDestination(
               icon: Icon(Icons.backpack), label: 'Mochilas'),
           NavigationDestination(

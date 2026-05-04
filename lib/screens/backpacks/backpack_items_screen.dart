@@ -1,9 +1,12 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../providers/backpacks_provider.dart';
+import '../../providers/orders_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../models/backpack_item_model.dart';
 import '../order/order_detail_screen.dart';
 
@@ -191,7 +194,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
             ),
         ],
       ),
-      body: provider.loading
+        body: provider.loadingItems
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
@@ -394,33 +397,39 @@ class _ActionButtonsState extends State<_ActionButtons> {
     // State 1 = Asignada → mostrar "Aceptar mochila"
     // State 2 = En Ruta  → mostrar "Finalizar mochila" (solo si todas validadas)
     if (widget.backpackState == 1) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: FilledButton.icon(
-          icon: const Icon(Icons.check),
-          label: const Text('Aceptar mochila'),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
-            backgroundColor: Colors.blue,
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: FilledButton.icon(
+            icon: const Icon(Icons.check),
+            label: const Text('Aceptar mochila'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: Colors.blue,
+            ),
+            onPressed: () => _changeState(2),
           ),
-          onPressed: () => _changeState(2),
         ),
       );
     }
 
     if (widget.backpackState == 2) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: FilledButton.icon(
-          icon: const Icon(Icons.flag),
-          label: Text(widget.allValidated
-              ? 'Finalizar mochila'
-              : 'Finalizar mochila (${widget.provider.selectedItems.where((i) => i.isValidated).length}/${widget.provider.selectedItems.length} validadas)'),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
-            backgroundColor: widget.allValidated ? Colors.green : Colors.orange,
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: FilledButton.icon(
+            icon: const Icon(Icons.flag),
+            label: Text(widget.allValidated
+                ? 'Finalizar mochila'
+                : 'Finalizar mochila (${widget.provider.selectedItems.where((i) => i.isValidated).length}/${widget.provider.selectedItems.length} validadas)'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: widget.allValidated ? Colors.green : Colors.orange,
+            ),
+            onPressed: widget.allValidated ? () => _changeState(3) : null,
           ),
-          onPressed: widget.allValidated ? () => _changeState(3) : null,
         ),
       );
     }
@@ -504,12 +513,21 @@ class _ItemTile extends StatelessWidget {
                 Icons.chevron_right, 
                 color: item.isValidated ? Colors.green : Colors.grey,
               ),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => OrderDetailScreen(orderId: item.idOrdenVenta),
-          ),
-        ),
+        onTap: () {
+          final auth = context.read<AuthProvider>();
+          unawaited(
+            context
+                .read<OrdersProvider>()
+                .preloadOrder(item.idOrdenVenta, auth.equiposForQuery),
+          );
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: item.idOrdenVenta),
+            ),
+          );
+        },
       ),
     );
   }

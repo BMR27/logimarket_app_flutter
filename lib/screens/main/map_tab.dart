@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart' as geo;
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/map_navigation_provider.dart';
 import '../../providers/auth_provider.dart';
@@ -36,6 +37,9 @@ class _MapTabState extends State<MapTab> {
   final Map<int, LatLng> _derivedCoordsByOrderId = {};
   final Map<int, int> _coordLookupAttemptsByOrderId = {};
   final Map<int, DateTime> _coordLastAttemptAtByOrderId = {};
+  final Set<int> _detailLookupFailedOrderIds = <int>{};
+  final Set<int> _addressLookupFailedOrderIds = <int>{};
+  String? _lastAddressDumpKey;
   int _coordResolvedCount = 0;
   int _coordFailedCount = 0;
 
@@ -191,9 +195,17 @@ class _MapTabState extends State<MapTab> {
     return double.tryParse(normalized);
   }
 
+  // Valida que una coordenada esté dentro de los límites de México
+  bool _isWithinMexico(double lat, double lng) {
+    return lat >= 14.5 && lat <= 32.7 && lng >= -117.1 && lng <= -86.7;
+  }
+
   bool _isOrderActiveInRoute(int statusId) {
-    // Mantener visibles solo órdenes activas durante la ruta.
-    return statusId == 2 || statusId == 7;
+    // Excluir status cerrados por ID numérico
+    // 1=Exitosa, 4=Cancelada, 8,9,10=otros cerrados
+    // 7=On Delivery es ACTIVO (repartidor en camino), NO se excluye
+    const closedStatuses = {1, 4, 8, 9, 10};
+    return !closedStatuses.contains(statusId);
   }
 
   bool _isBackpackItemActiveInRoute(
@@ -202,27 +214,26 @@ class _MapTabState extends State<MapTab> {
   ) {
     if (item.isValidated) return false;
 
-    final orderStatus = statusByOrderId[item.idOrdenVenta];
-    if (orderStatus != null) {
-      return _isOrderActiveInRoute(orderStatus);
-    }
-
-    if (_isOrderActiveInRoute(item.idStatusOrden)) return true;
-
-    final statusText = item.statusName.toLowerCase();
-    if (statusText.contains('exitos') ||
-        statusText.contains('cancelad') ||
-        statusText.contains('entregad') ||
-        statusText.contains('devuelt')) {
+    // Priorizar status numérico para evitar falsos negativos por texto parcial
+    if (!_isOrderActiveInRoute(item.idStatusOrden)) {
       return false;
     }
 
-    if (statusText.contains('en ruta') || statusText.contains('on delivery')) {
-      return true;
+    // Fallback por texto para estados claramente cerrados (por si el ID no está mapeado)
+    final statusText = item.statusName.toLowerCase();
+    final closedByText = statusText.contains('exitosa') ||
+        statusText.contains('cancelada') ||
+        statusText.contains('devuelta');
+    if (closedByText) return false;
+
+    // Si existe un status de la orden, excluir solo los cerrados.
+    final orderStatus = statusByOrderId[item.idOrdenVenta];
+    if (orderStatus != null && !_isOrderActiveInRoute(orderStatus)) {
+      return false;
     }
 
-    // Fallback conservador: solo mantener visible si viene sin estatus claro.
-    return item.idStatusOrden == 0 && statusText.trim().isEmpty;
+    // Si llegó a mochila En Ruta y no está cerrada/validada, debe verse.
+    return true;
   }
 
   Future<LatLng?> _resolveCoordFromOrder(OrderModel order) async {
@@ -240,6 +251,44 @@ class _MapTabState extends State<MapTab> {
     }
   }
 
+  void _debugDumpBackpackAddresses(
+    List<BackpackItemModel> allItems,
+    List<BackpackItemModel> activeItems,
+    Map<int, int> statusByOrderId,
+    List<OrderModel> allOrders,
+    String enRutaKey,
+  ) {
+    final dumpKey = '$enRutaKey|all:${allItems.length}|act:${activeItems.length}';
+    if (_lastAddressDumpKey == dumpKey) return;
+    _lastAddressDumpKey = dumpKey;
+
+    final activeIds = activeItems.map((i) => i.idBackpackItem).toSet();
+    final orderById = <int, OrderModel>{for (final o in allOrders) o.id: o};
+
+    debugPrint('[MAP][DEBUG] ------- DUMP DIRECCIONES MOCHILA -------');
+    for (final item in allItems) {
+      final order = orderById[item.idOrdenVenta];
+      final orderStatus = statusByOrderId[item.idOrdenVenta];
+      final isActive = activeIds.contains(item.idBackpackItem);
+      final reason = isActive
+          ? 'ACTIVA'
+          : (item.isValidated
+                ? 'EXCLUIDA:VALIDADA'
+                : (!_isOrderActiveInRoute(item.idStatusOrden)
+                    ? 'EXCLUIDA:STATUS_ITEM_CERRADO(${item.idStatusOrden})'
+                    : (orderStatus != null && !_isOrderActiveInRoute(orderStatus)
+                        ? 'EXCLUIDA:STATUS_ORDEN_CERRADO($orderStatus)'
+                        : 'EXCLUIDA:STATUS_TEXTO(${item.statusName})')));
+
+      debugPrint(
+        '[MAP][DEBUG] OV:${item.idOrdenVenta} Folio:${item.folioOrden} Bp:${item.idBackpack} '
+        'StatItem:${item.idStatusOrden}/${item.statusName} StatOrden:${orderStatus ?? -1} '
+        'Reason:$reason | ItemAddr:"${item.fullAddress}" | OrderAddr:"${order?.fullAddress ?? ''}"',
+      );
+    }
+    debugPrint('[MAP][DEBUG] --------------------------------------');
+  }
+
   Future<void> _resolveMissingCoords(
     List<BackpackItemModel> items,
     Map<int, LatLng> coordsByOrderId,
@@ -252,73 +301,174 @@ class _MapTabState extends State<MapTab> {
       for (final o in allOrders) o.id: o,
     };
 
-    final now = DateTime.now();
-    final missingItems = items.where((i) {
-      final orderId = i.idOrdenVenta;
-      if (coordsByOrderId.containsKey(orderId) ||
-          _derivedCoordsByOrderId.containsKey(orderId)) {
-        return false;
-      }
+    List<BackpackItemModel> buildMissingBatch() {
+      final now = DateTime.now();
+      return items.where((i) {
+        final orderId = i.idOrdenVenta;
+        if (coordsByOrderId.containsKey(orderId) ||
+            _derivedCoordsByOrderId.containsKey(orderId)) {
+          return false;
+        }
 
-      final attempts = _coordLookupAttemptsByOrderId[orderId] ?? 0;
-      if (attempts >= 3) return false;
+        final attempts = _coordLookupAttemptsByOrderId[orderId] ?? 0;
+        if (attempts >= 3) return false;
 
-      final lastAttemptAt = _coordLastAttemptAtByOrderId[orderId];
-      if (lastAttemptAt != null &&
-          now.difference(lastAttemptAt) < const Duration(seconds: 5)) {
-        return false;
-      }
+        final lastAttemptAt = _coordLastAttemptAtByOrderId[orderId];
+        if (lastAttemptAt != null &&
+            now.difference(lastAttemptAt) < const Duration(seconds: 2)) {
+          return false;
+        }
 
-      return true;
-    }).take(10).toList();
+        return true;
+      }).take(8).toList();
+    }
 
-    if (missingItems.isEmpty) return;
+    if (buildMissingBatch().isEmpty) return;
 
     _resolvingMissingCoords = true;
 
     try {
-      for (final item in missingItems) {
-        final orderId = item.idOrdenVenta;
-        _coordLookupAttemptsByOrderId[orderId] =
-            (_coordLookupAttemptsByOrderId[orderId] ?? 0) + 1;
-        _coordLastAttemptAtByOrderId[orderId] = DateTime.now();
-        LatLng? resolved;
+      while (true) {
+        final missingItems = buildMissingBatch();
+        if (missingItems.isEmpty) break;
 
-        // 1st priority: use address fields directly from backpack item (backend now returns them)
-        final itemAddress = item.fullAddress.trim();
-        if (itemAddress.isNotEmpty) {
-          resolved = await _geocodeAddress(itemAddress);
-        }
+        for (final item in missingItems) {
+          final orderId = item.idOrdenVenta;
+          _coordLookupAttemptsByOrderId[orderId] =
+              (_coordLookupAttemptsByOrderId[orderId] ?? 0) + 1;
+          _coordLastAttemptAtByOrderId[orderId] = DateTime.now();
+          LatLng? resolved;
 
-        // 2nd: try order already loaded in provider
-        if (resolved == null) {
           final order = orderById[orderId];
-          if (order != null) {
+          final candidates = _buildAddressCandidates(item, order);
+
+          for (final address in candidates) {
+            resolved = await _geocodeAddress(address);
+            if (resolved != null) break;
+          }
+
+          if (resolved == null && order != null) {
             resolved = await _resolveCoordFromOrder(order);
+          }
+
+          if (resolved == null && orderId > 0) {
+            // Intenta obtener la orden completa con el detail endpoint
+            // Usar una sola variante de equipos para evitar ruido por 404 duplicado.
+            final eq = equipos.trim();
+            if (!_detailLookupFailedOrderIds.contains(orderId)) {
+              try {
+                final detail =
+                    await _ordersService.getOrderDetail(orderId, equipos: eq);
+                debugPrint('[MAP][DETAIL] OV:$orderId eq:"$eq" addr:"${detail.fullAddress}" lat:${detail.latitud}');
+                final detailCandidates = _buildAddressCandidates(item, detail);
+                for (final address in detailCandidates) {
+                  resolved = await _geocodeAddress(address);
+                  if (resolved != null) break;
+                }
+                resolved ??= await _resolveCoordFromOrder(detail);
+              } catch (e) {
+                debugPrint('[MAP][DETAIL] OV:$orderId eq:"$eq" ERROR: $e');
+                _detailLookupFailedOrderIds.add(orderId);
+              }
+            }
+
+            // Último fallback: endpoint directo de dirección sin filtro de equipo
+            if (resolved == null && !_addressLookupFailedOrderIds.contains(orderId)) {
+              try {
+                final addr = await _ordersService.getOrderAddress(orderId);
+                debugPrint('[MAP][ADDR] OV:$orderId addr:"${addr.fullAddress}" lat:${addr.latitud}');
+                final addrCandidates = _buildAddressCandidates(item, addr);
+                for (final address in addrCandidates) {
+                  resolved = await _geocodeAddress(address);
+                  if (resolved != null) break;
+                }
+                resolved ??= await _resolveCoordFromOrder(addr);
+              } catch (e) {
+                debugPrint('[MAP][ADDR] OV:$orderId ERROR: $e');
+                _addressLookupFailedOrderIds.add(orderId);
+              }
+            }
+          }
+
+          if (resolved != null) {
+            _derivedCoordsByOrderId[orderId] = resolved;
+            _coordResolvedCount++;
+          } else {
+            _coordFailedCount++;
           }
         }
 
-        // 3rd: fetch order detail from API as last resort
-        if (resolved == null) {
-          try {
-            final detail = await _ordersService.getOrderDetail(orderId, equipos: equipos);
-            resolved = await _resolveCoordFromOrder(detail);
-          } catch (_) {}
-        }
-
-        if (resolved != null) {
-          _derivedCoordsByOrderId[orderId] = resolved;
-          _coordResolvedCount++;
-        } else {
-          _coordFailedCount++;
-        }
-
         if (mounted) setState(() {});
+        await Future.delayed(const Duration(milliseconds: 450));
       }
     } finally {
       _resolvingMissingCoords = false;
       if (mounted) setState(() {});
     }
+  }
+
+  List<String> _buildAddressCandidates(BackpackItemModel item, OrderModel? order) {
+    final candidates = <String>[];
+    // Contexto de estado para anclar la búsqueda en la zona correcta
+    final estado = (item.estado ?? order?.estado ?? '').trim();
+    final municipio = (item.municipio ?? order?.municipioDelegacion ?? '').trim();
+    final suffix = estado.isNotEmpty ? ', $estado, Mexico' : ', Mexico';
+
+    void add(String? raw) {
+      final value = (raw ?? '').trim();
+      if (value.isEmpty) return;
+      // Siempre agregar versión con sufijo de estado para anclar geocoding
+      final withState = estado.isNotEmpty ? '$value$suffix' : value;
+      if (!candidates.contains(withState)) candidates.add(withState);
+      if (!candidates.contains(value)) candidates.add(value);
+    }
+
+    // Candidato más específico primero: calle + municipio + estado
+    final calle = '${item.calle ?? ''} ${item.numExterior ?? ''}'.trim();
+    final colonia = item.colonia ?? '';
+    final cp = (item.codigoPostal ?? order?.codigoPostal ?? '').trim();
+
+    // CP es el ancla más confiable para geocodificar en México
+    if (cp.isNotEmpty && calle.isNotEmpty) {
+      candidates.add('$calle, $colonia, $cp, Mexico');
+    }
+    if (cp.isNotEmpty && colonia.isNotEmpty) {
+      candidates.add('$colonia, $cp, Mexico');
+    }
+    if (cp.isNotEmpty && municipio.isNotEmpty) {
+      candidates.add('$cp, $municipio, Mexico');
+    }
+    if (cp.isNotEmpty) {
+      candidates.add('$cp, Mexico');
+    }
+
+    if (calle.isNotEmpty && municipio.isNotEmpty) {
+      add('$calle, $colonia, $municipio$suffix');
+    }
+    if (colonia.isNotEmpty && municipio.isNotEmpty) {
+      add('$colonia, $municipio$suffix');
+    }
+    add(item.fullAddress);
+
+    if (order != null) {
+      final oCalle = '${order.calle} ${order.numExterior}'.trim();
+      final oMunicipio = order.municipioDelegacion.trim();
+      final oEstado = order.estado.trim();
+      final oCP = order.codigoPostal.trim();
+      if (oCP.isNotEmpty && oCalle.isNotEmpty) {
+        candidates.add('$oCalle, ${order.colonia}, CP $oCP, Mexico');
+      }
+      if (oCP.isNotEmpty && order.colonia.isNotEmpty) {
+        candidates.add('${order.colonia}, CP $oCP, Mexico');
+      }
+      if (oCalle.isNotEmpty && oMunicipio.isNotEmpty) {
+        add('$oCalle, ${order.colonia}, $oMunicipio, $oEstado, Mexico');
+      }
+      add('${order.colonia}, $oMunicipio, $oEstado, Mexico');
+      add(order.fullAddress);
+    }
+
+    return candidates;
   }
 
   Future<LatLng?> _geocodeAddress(String query) async {
@@ -327,7 +477,10 @@ class _MapTabState extends State<MapTab> {
       try {
         final locations = await geo.locationFromAddress(query);
         if (locations.isNotEmpty) {
-          return LatLng(locations.first.latitude, locations.first.longitude);
+          final loc = locations.first;
+          if (_isWithinMexico(loc.latitude, loc.longitude)) {
+            return LatLng(loc.latitude, loc.longitude);
+          }
         }
       } catch (_) {
         // Fallback a proveedores HTTP
@@ -351,7 +504,7 @@ class _MapTabState extends State<MapTab> {
               final location = (results.first['geometry']?['location']) as Map<String, dynamic>?;
               final lat = (location?['lat'] as num?)?.toDouble();
               final lng = (location?['lng'] as num?)?.toDouble();
-              if (lat != null && lng != null) return LatLng(lat, lng);
+              if (lat != null && lng != null && _isWithinMexico(lat, lng)) return LatLng(lat, lng);
             }
           }
         }
@@ -372,6 +525,7 @@ class _MapTabState extends State<MapTab> {
       final geoLat = double.tryParse((data.first['lat'] ?? '').toString());
       final geoLng = double.tryParse((data.first['lon'] ?? '').toString());
       if (geoLat == null || geoLng == null) return null;
+      if (!_isWithinMexico(geoLat, geoLng)) return null;
       return LatLng(geoLat, geoLng);
     } catch (_) {
       return null;
@@ -414,21 +568,92 @@ class _MapTabState extends State<MapTab> {
     Map<int, LatLng> coordsByOrderId,
     Map<String, LatLng> coordsByFolio,
   ) {
-    _markers = items
-        .where((i) => !i.isValidated)
-        .map((i) {
+    final pointsKeyToIndices = <String, List<int>>{};
+    final orderedItems = items.where((i) => !i.isValidated).toList();
+    final basePositions = <LatLng>[];
+
+    for (var idx = 0; idx < orderedItems.length; idx++) {
+      final i = orderedItems[idx];
       final lat = _parseCoord(i.latitud);
       final lng = _parseCoord(i.longitud);
-      final fallback = coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
-      final markerPos =
-          (lat != null && lng != null) ? LatLng(lat, lng) : fallback;
-      if (markerPos == null) return null;
+      final directPos = (lat != null && lng != null && _isWithinMexico(lat, lng))
+          ? LatLng(lat, lng)
+          : null;
+      final fallback =
+          coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
+      final basePos = directPos ?? fallback;
+      if (basePos == null) continue;
+      basePositions.add(basePos);
+      final key =
+          '${basePos.latitude.toStringAsFixed(5)},${basePos.longitude.toStringAsFixed(5)}';
+      pointsKeyToIndices.putIfAbsent(key, () => <int>[]).add(idx);
+    }
+
+    LatLng fallbackCenter;
+    if (basePositions.isNotEmpty) {
+      final latAvg =
+          basePositions.map((p) => p.latitude).reduce((a, b) => a + b) /
+              basePositions.length;
+      final lngAvg =
+          basePositions.map((p) => p.longitude).reduce((a, b) => a + b) /
+              basePositions.length;
+      fallbackCenter = LatLng(latAvg, lngAvg);
+    } else if (_currentPosition != null) {
+      fallbackCenter =
+          LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
+    } else {
+      fallbackCenter = _initialCamera.target;
+    }
+
+    var missingIndex = 0;
+
+    _markers = orderedItems.asMap().entries.map((entry) {
+      final idx = entry.key;
+      final i = entry.value;
+      final lat = _parseCoord(i.latitud);
+      final lng = _parseCoord(i.longitud);
+      // Solo usar coordenadas directas si están dentro de México
+      final directPos = (lat != null && lng != null && _isWithinMexico(lat, lng))
+          ? LatLng(lat, lng)
+          : null;
+      final fallback =
+          coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
+      final basePos = directPos ?? fallback;
+      final isFallbackWithoutCoords = basePos == null;
+
+      late final LatLng markerPos;
+      if (isFallbackWithoutCoords) {
+        final angle = (2 * pi * (missingIndex % 12)) / 12;
+        final radius = 0.0012 + ((missingIndex ~/ 12) * 0.00045);
+        markerPos = LatLng(
+          fallbackCenter.latitude + radius * sin(angle),
+          fallbackCenter.longitude + radius * cos(angle),
+        );
+        missingIndex++;
+      } else {
+        final key =
+            '${basePos!.latitude.toStringAsFixed(5)},${basePos.longitude.toStringAsFixed(5)}';
+        final overlapGroup = pointsKeyToIndices[key] ?? const <int>[];
+        final groupSize = overlapGroup.length;
+        final groupIndex = overlapGroup.indexOf(idx);
+        markerPos = groupSize > 1
+            ? _offsetOverlappingPin(basePos, groupIndex, groupSize)
+            : basePos;
+      }
+
+      final detailSnippet = [
+        i.nombreCliente.trim(),
+        'Mochila ${i.idBackpack}',
+        i.statusName.trim(),
+        if (isFallbackWithoutCoords) 'Coordenada pendiente',
+      ].where((v) => v.isNotEmpty).join(' | ');
+
       return Marker(
         markerId: MarkerId('bp_item_${i.idBackpackItem}'),
         position: markerPos,
         infoWindow: InfoWindow(
-          title: i.folioOrden,
-          snippet: i.nombreCliente,
+          title: '${i.folioOrden} (OV ${i.idOrdenVenta})',
+          snippet: detailSnippet,
         ),
       );
     }).whereType<Marker>().toSet();
@@ -444,11 +669,24 @@ class _MapTabState extends State<MapTab> {
     }
   }
 
+  LatLng _offsetOverlappingPin(LatLng base, int groupIndex, int groupSize) {
+    if (groupSize <= 1 || groupIndex < 0) return base;
+
+    final ringRadius = 0.0006; // ~65m para separar pines traslapados visualmente
+    final angle = (2 * pi * groupIndex) / groupSize;
+    final latOffset = ringRadius * sin(angle);
+    final lngOffset = ringRadius * cos(angle);
+    return LatLng(base.latitude + latOffset, base.longitude + lngOffset);
+  }
+
   void _animateToBounds(List<LatLng> points) {
     if (points.isEmpty || _mapController == null) return;
-    double minLat = points.first.latitude, maxLat = points.first.latitude;
-    double minLng = points.first.longitude, maxLng = points.first.longitude;
-    for (final p in points) {
+    // Solo incluir puntos dentro de México para evitar que 1 pin lejano aleje todo el mapa
+    final mexicoPoints = points.where((p) => _isWithinMexico(p.latitude, p.longitude)).toList();
+    final validPoints = mexicoPoints.isNotEmpty ? mexicoPoints : points;
+    double minLat = validPoints.first.latitude, maxLat = validPoints.first.latitude;
+    double minLng = validPoints.first.longitude, maxLng = validPoints.first.longitude;
+    for (final p in validPoints) {
       if (p.latitude < minLat) minLat = p.latitude;
       if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;
@@ -463,6 +701,58 @@ class _MapTabState extends State<MapTab> {
         80,
       ),
     );
+  }
+
+  Future<void> _openExternalNavigator({
+    required bool waze,
+    LatLng? destination,
+    String? address,
+  }) async {
+    Uri uri;
+    final hasCoords = destination != null;
+    final query = (address ?? '').trim();
+
+    if (waze) {
+      if (hasCoords) {
+        uri = Uri.parse(
+          'waze://?ll=${destination!.latitude},${destination.longitude}&navigate=yes',
+        );
+      } else {
+        uri = Uri.parse('waze://?q=${Uri.encodeComponent(query)}&navigate=yes');
+      }
+
+      if (!await canLaunchUrl(uri)) {
+        if (hasCoords) {
+          uri = Uri.parse(
+            'https://waze.com/ul?ll=${destination!.latitude},${destination.longitude}&navigate=yes',
+          );
+        } else {
+          uri = Uri.parse(
+            'https://waze.com/ul?q=${Uri.encodeComponent(query)}&navigate=yes',
+          );
+        }
+      }
+    } else {
+      if (hasCoords) {
+        uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${destination!.latitude},${destination.longitude}&travelmode=driving',
+        );
+      } else {
+        uri = Uri.parse(
+          'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}',
+        );
+      }
+    }
+
+    if (!await canLaunchUrl(uri)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el navegador externo')),
+      );
+      return;
+    }
+
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   @override
@@ -497,7 +787,8 @@ class _MapTabState extends State<MapTab> {
     for (final o in orders) {
       final lat = _parseCoord(o.latitud);
       final lng = _parseCoord(o.longitud);
-      if (lat == null || lng == null) continue;
+      // Solo usar coordenadas de órdenes que estén dentro de México
+      if (lat == null || lng == null || !_isWithinMexico(lat, lng)) continue;
       final pos = LatLng(lat, lng);
       coordsByOrderId[o.id] = pos;
       final folio = o.folioOrdenCliente.trim();
@@ -509,6 +800,19 @@ class _MapTabState extends State<MapTab> {
     final activeBackpackItems = pendingBackpackItems
         .where((i) => _isBackpackItemActiveInRoute(i, statusByOrderId))
         .toList();
+    final filteredOutCount = pendingBackpackItems.length - activeBackpackItems.length;
+
+    if (!isAdmin && hasEnRutaBackpack && pendingBackpackItems.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _debugDumpBackpackAddresses(
+          pendingBackpackItems,
+          activeBackpackItems,
+          statusByOrderId,
+          orders,
+          enRutaKey,
+        );
+      });
+    }
 
     final pendingWithCoords = activeBackpackItems.where((i) {
       final lat = _parseCoord(i.latitud);
@@ -673,6 +977,32 @@ class _MapTabState extends State<MapTab> {
             ),
           ),
 
+        if (!mapNav.loading && mapNav.routeError != null)
+          Positioned(
+            top: 60,
+            left: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD93025),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2))
+                ],
+              ),
+              child: Text(
+                mapNav.routeError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+
         // Diagnóstico temporal del mapa (puede retirarse cuando esté validado)
         Positioned(
           top: 12,
@@ -684,7 +1014,7 @@ class _MapTabState extends State<MapTab> {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              'Ruta:${hasEnRutaBackpack ? 'si' : 'no'} Bp:${enRutaBackpackIds.length} Pend:${pendingBackpackItems.length} Coord:${pendingWithCoords.length} Miss:${missingCoordsCount} Ok:${_coordResolvedCount} Err:${_coordFailedCount} Pins:${_markers.length}',
+              'Ruta:${hasEnRutaBackpack ? 'si' : 'no'} Bp:${enRutaBackpackIds.length} Pend:${pendingBackpackItems.length} Act:${activeBackpackItems.length} Fil:${filteredOutCount} Coord:${pendingWithCoords.length} Miss:${missingCoordsCount} Ok:${_coordResolvedCount} Err:${_coordFailedCount} Pins:${_markers.length}',
               style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -708,6 +1038,16 @@ class _MapTabState extends State<MapTab> {
                   _animateNavCamera(_currentPosition!, mapNav.destination!);
                 }
               },
+              onOpenGoogleMaps: () => _openExternalNavigator(
+                waze: false,
+                destination: mapNav.destination,
+                address: mapNav.destinationAddress,
+              ),
+              onOpenWaze: () => _openExternalNavigator(
+                waze: true,
+                destination: mapNav.destination,
+                address: mapNav.destinationAddress,
+              ),
             ),
           ),
 
@@ -773,18 +1113,22 @@ class _NavigationPanel extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback onRecenter;
+  final VoidCallback onOpenGoogleMaps;
+  final VoidCallback onOpenWaze;
 
   const _NavigationPanel({
     required this.mapNav,
     required this.onStart,
     required this.onStop,
     required this.onRecenter,
+    required this.onOpenGoogleMaps,
+    required this.onOpenWaze,
   });
 
   @override
   Widget build(BuildContext context) {
     final address = mapNav.destinationAddress ?? 'Destino';
-    final hasRoute = mapNav.distanceText.isNotEmpty;
+    final hasRoute = mapNav.routePoints.length > 1;
     final isStarted = mapNav.started;
 
     return Container(
@@ -904,11 +1248,15 @@ class _NavigationPanel extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: onStart,
+                    onPressed: hasRoute ? onStart : null,
                     icon: const Icon(Icons.navigation, size: 20),
-                    label: const Text('Iniciar viaje',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w700)),
+                    label: Text(
+                      hasRoute ? 'Iniciar viaje' : 'Sin ruta disponible',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF34A853),
                       foregroundColor: Colors.white,
@@ -919,6 +1267,28 @@ class _NavigationPanel extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (!hasRoute) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onOpenGoogleMaps,
+                          icon: const Icon(Icons.map, size: 18),
+                          label: const Text('Google Maps'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onOpenWaze,
+                          icon: const Icon(Icons.directions_car, size: 18),
+                          label: const Text('Waze'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 8),
                 // Botón cancelar (secundario)
                 SizedBox(
