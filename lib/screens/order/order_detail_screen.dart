@@ -104,11 +104,63 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       }
 
       await Future.wait(futures);
+
+      final selected = context.read<OrdersProvider>().selectedOrder;
+      if (selected != null && mounted) {
+        _syncMotivoSelectionFromOrder(selected);
+      }
     } catch (_) {
       // Se mantiene la pantalla funcional aunque fallen cargas secundarias.
     }
 
     if (mounted) setState(() {});
+  }
+
+  void _syncMotivoSelectionFromOrder(OrderModel order) {
+    if (_selectedStatus == null) return;
+
+    final motivosForStatus = _motivos.where((m) => m.idStatus == _selectedStatus).toList();
+    if (motivosForStatus.isEmpty) return;
+
+    final motivoIds = motivosForStatus.map((m) => m.id).toSet();
+    int? resolvedMotivo = _selectedMotivo;
+
+    if (resolvedMotivo == null || !motivoIds.contains(resolvedMotivo)) {
+      if (order.idMotivoStatus > 0 && motivoIds.contains(order.idMotivoStatus)) {
+        resolvedMotivo = order.idMotivoStatus;
+      } else {
+        final orderMotivoText = order.motivoStatus.trim().toLowerCase();
+        if (orderMotivoText.isNotEmpty) {
+          final byText = motivosForStatus.where((m) => m.motivo.trim().toLowerCase() == orderMotivoText).toList();
+          if (byText.isNotEmpty) resolvedMotivo = byText.first.id;
+        }
+      }
+    }
+
+    int? resolvedExplicacion = _selectedExplicacion;
+    if (resolvedMotivo != null) {
+      final expForMotivo = _explicaciones.where((e) => e.idMotivo == resolvedMotivo).toList();
+      final expIds = expForMotivo.map((e) => e.id).toSet();
+
+      if (resolvedExplicacion == null || !expIds.contains(resolvedExplicacion)) {
+        if (order.idExplicacionMotivo > 0 && expIds.contains(order.idExplicacionMotivo)) {
+          resolvedExplicacion = order.idExplicacionMotivo;
+        } else {
+          final orderExpText = order.explicacionMotivo.trim().toLowerCase();
+          if (orderExpText.isNotEmpty) {
+            final byText = expForMotivo.where((e) => e.explicacion.trim().toLowerCase() == orderExpText).toList();
+            if (byText.isNotEmpty) resolvedExplicacion = byText.first.id;
+          }
+        }
+      }
+    }
+
+    if (resolvedMotivo != _selectedMotivo || resolvedExplicacion != _selectedExplicacion) {
+      setState(() {
+        _selectedMotivo = resolvedMotivo;
+        _selectedExplicacion = resolvedExplicacion;
+      });
+    }
   }
 
   Future<void> _loadPriceRequest() async {

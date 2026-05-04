@@ -10,10 +10,17 @@ class MotivoStatusModel {
   });
 
   factory MotivoStatusModel.fromJson(Map<String, dynamic> json) => MotivoStatusModel(
-        id: (json['id'] ?? json['Id'] ?? 0) as int,
-        idStatus: (json['IdStatus'] ?? json['idStatus'] ?? 0) as int,
+        id: _asInt(json['id'] ?? json['Id']),
+        idStatus: _asInt(json['IdStatus'] ?? json['idStatus']),
         motivo: json['Motivo'] ?? json['motivo'] ?? '',
       );
+
+  static int _asInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString().trim()) ?? 0;
+  }
 }
 
 class MotivoExplicacionModel {
@@ -28,8 +35,15 @@ class MotivoExplicacionModel {
   });
 
   factory MotivoExplicacionModel.fromJson(Map<String, dynamic> json) => MotivoExplicacionModel(
-        id: (json['id'] ?? json['Id'] ?? 0) as int,
-        idMotivo: (json['IdMotivo'] ?? json['idMotivo'] ?? 0) as int,
+        id: _asInt(json['id'] ?? json['Id']),
+        idMotivo: _asInt(json['IdMotivo'] ?? json['idMotivo']),
         explicacion: json['Explicacion'] ?? json['explicacion'] ?? '',
       );
+
+  static int _asInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString().trim()) ?? 0;
+  }
 }
