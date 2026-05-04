@@ -83,6 +83,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         // Inicializar status solo si el valor está en las opciones válidas
         final validIds = _statusOptions.map((s) => s['id'] as int).toSet();
         _selectedStatus = validIds.contains(order.idStatus) ? order.idStatus : null;
+        _selectedMotivo = order.idMotivoStatus > 0 ? order.idMotivoStatus : null;
+        _selectedExplicacion = order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : null;
       }
       setState(() {});
     }
@@ -436,13 +438,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     setState(() => _saving = true);
     bool ok = false;
     String? saveError;
+    final sameStatusAsCurrent = order != null && _selectedStatus == order.idStatus;
+    final motivoToSave = _selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0);
+    final explicacionToSave = _selectedExplicacion ?? (sameStatusAsCurrent && order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : 0);
     try {
       ok = await context.read<OrdersProvider>().updateOrder(
             idOrden: widget.orderId,
             status: _selectedStatus!,
             idUsuario: auth.user!.idUsuario,
-            motivoStatus: _selectedMotivo ?? 0,
-            explicacionMotivo: _selectedExplicacion ?? 0,
+            motivoStatus: motivoToSave,
+            explicacionMotivo: explicacionToSave,
             fechaReagenda: _fechaReagenda?.toIso8601String(),
           );
     } on ApiException catch (e) {
@@ -1029,7 +1034,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     h['statusNuevo'],
                     h['idStatusNuevo'] ?? h['statusNuevo'],
                   );
-                  final motivo = (h['motivoStatus'] ?? h['motivoCambio'] ?? '').toString();
                   final explicacion = (h['explicacionMotivo'] ?? '').toString();
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1039,7 +1043,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Fecha modificación: ${_fmtHistoryDate(h)}'),
-                        if (motivo.isNotEmpty) Text('Motivo: $motivo'),
                         if (explicacion.isNotEmpty) Text('Explicación: $explicacion'),
                       ],
                     ),
