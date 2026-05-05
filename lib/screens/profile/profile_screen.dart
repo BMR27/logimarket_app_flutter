@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
+import '../../services/app_sound_service.dart';
 import '../../config/api_config.dart';
 import '../../utils/app_theme.dart';
 
@@ -219,6 +220,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onChanged: (v) {
                   setState(() => _uiSoundEnabled = v);
                   _prefs?.setBool('uiSoundEnabled', v);
+                  if (v) AppSoundService.playUiTap();
                 },
               ),
               if (_uiSoundEnabled)
@@ -233,6 +235,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onChanged: (v) {
                             setState(() => _uiVolume = v);
                             _prefs?.setDouble('uiVolume', v);
+                            AppSoundService.playUiTap();
                           },
                         ),
                       ),
@@ -257,6 +260,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onChanged: (v) {
               setState(() => _codebarSoundEnabled = v);
               _prefs?.setBool('codebarSoundEnabled', v);
+              if (v) AppSoundService.playScannerSuccess();
             },
           ),
         ),

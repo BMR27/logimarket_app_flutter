@@ -118,8 +118,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               labelText: 'Correo',
                               prefixIcon: Icon(Icons.email_outlined),
                             ),
-                            validator: (v) =>
-                                v == null || v.isEmpty ? 'Ingresa tu correo' : null,
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'Ingresa tu correo';
+                              if (!v.trim().toLowerCase().endsWith('@logimarket.com.mx')) {
+                                return 'Solo se permiten correos @logimarket.com.mx';
+                              }
+                              return null;
+                            },
                           ),
                           const SizedBox(height: 16),
 

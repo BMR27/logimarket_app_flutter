@@ -58,15 +58,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   // Opciones de status de orden
   static const _statusOptions = [
     {'id': 1, 'name': 'Exitosa'},
-    {'id': 2, 'name': 'Asignada'},
-    {'id': 3, 'name': 'Sin Asignar'},
     {'id': 4, 'name': 'Cancelada'},
     {'id': 5, 'name': 'Intento 1'},
     {'id': 6, 'name': 'Intento 2'},
-    {'id': 7, 'name': 'On Delivery'},
   ];
 
+  static const _statusDisplayNames = {
+    7: 'Por Calificar',
+  };
+
   String _statusNameById(int id) {
+    if (_statusDisplayNames.containsKey(id)) return _statusDisplayNames[id]!;
     final found = _statusOptions.where((s) => s['id'] == id).toList();
     if (found.isNotEmpty) return (found.first['name'] as String).trim();
     return 'Status $id';
@@ -80,9 +82,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       final order = context.read<OrdersProvider>().selectedOrder;
       if (order != null) {
         _notesCtrl.text = order.observacionesMensajero ?? '';
-        // Inicializar status solo si el valor está en las opciones válidas
-        final validIds = _statusOptions.map((s) => s['id'] as int).toSet();
-        _selectedStatus = validIds.contains(order.idStatus) ? order.idStatus : null;
+        // Mantener el status actual aunque no esté en las opciones editables.
+        _selectedStatus = order.idStatus > 0 ? order.idStatus : null;
         _selectedMotivo = order.idMotivoStatus > 0 ? order.idMotivoStatus : null;
         _selectedExplicacion = order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : null;
       }
@@ -475,6 +476,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _save() async {
     final auth = context.read<AuthProvider>();
     final order = context.read<OrdersProvider>().selectedOrder;
+    if (order != null && order.idStatus == 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('La orden ya esta Cancelada y no puede modificarse')),
+      );
+      return;
+    }
     if (_selectedStatus == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecciona un status')),
@@ -491,8 +498,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     bool ok = false;
     String? saveError;
     final sameStatusAsCurrent = order != null && _selectedStatus == order.idStatus;
-    final motivoToSave = _selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0);
-    final explicacionToSave = _selectedExplicacion ?? (sameStatusAsCurrent && order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : 0);
+    final isCancelada = _selectedStatus == 4;
+    final motivoToSave = isCancelada
+      ? (_selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0))
+      : 0;
+    final explicacionToSave = isCancelada
+      ? (_selectedExplicacion ?? (sameStatusAsCurrent && order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : 0))
+      : 0;
     try {
       ok = await context.read<OrdersProvider>().updateOrder(
             idOrden: widget.orderId,
@@ -544,10 +556,41 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  String _normalizeWhatsappPhone(String phone) {
+    var digits = phone.replaceAll(RegExp(r'\D'), '');
+
+    // MX local format (10 dígitos) -> agregar lada país 52
+    if (digits.length == 10) return '52$digits';
+
+    // Quitar prefijos internacionales comunes antes de normalizar
+    if (digits.startsWith('00')) {
+      digits = digits.substring(2);
+    }
+    if (digits.startsWith('521') && digits.length >= 12) {
+      // Formato histórico de WhatsApp MX
+      return '52${digits.substring(3)}';
+    }
+    if (digits.startsWith('52') && digits.length >= 12) {
+      return digits;
+    }
+
+    // Fallback: si no trae lada país, usar MX
+    if (digits.length <= 10) return '52$digits';
+    return digits;
+  }
+
   Future<void> _openWhatsApp(String phone) async {
-    final clean = phone.replaceAll(RegExp(r'\D'), '');
-    final uri = Uri.parse('https://wa.me/52$clean');
-    if (await canLaunchUrl(uri)) launchUrl(uri);
+    final normalized = _normalizeWhatsappPhone(phone);
+    final uri = Uri.parse('https://wa.me/$normalized');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No se pudo abrir WhatsApp en este dispositivo')),
+    );
   }
 
   Future<void> _callPhone(String phone) async {
@@ -688,14 +731,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     }
 
-    final motivosFiltrados = _motivos
-        .where((m) => m.idStatus == _selectedStatus)
-        .toList();
-    final explicacionesFiltradas = _explicaciones
-        .where((e) => e.idMotivo == _selectedMotivo)
-        .toList();
+    final motivosCancelada = _motivos.where((m) => m.idStatus == 4).toList();
+    final isLockedByFinalStatus = order.idStatus == 1 || order.idStatus == 4;
+    final canEditCalificacion = !isLockedByFinalStatus;
+    final canEditMotivo = canEditCalificacion && _selectedStatus == 4;
+    final explicacionesFiltradas = canEditMotivo
+      ? _explicaciones.where((e) => e.idMotivo == _selectedMotivo).toList()
+      : <MotivoExplicacionModel>[];
     final hasIntento1 = _hasIntento1Step(order);
-    final isLockedBySuccess = order.idStatus == 1;
+    final statusOptionsForDropdown = List<Map<String, Object>>.from(_statusOptions);
+    final hasCurrentStatusInEditableList = statusOptionsForDropdown.any((s) => s['id'] == order.idStatus);
+    if (order.idStatus > 0 && !hasCurrentStatusInEditableList) {
+      // _statusDisplayNames tiene prioridad sobre el texto del servidor
+      final currentStatusLabel = _statusDisplayNames.containsKey(order.idStatus)
+          ? _statusDisplayNames[order.idStatus]!
+          : (order.statusOrden.trim().isNotEmpty
+              ? order.statusOrden.trim()
+              : _statusNameById(order.idStatus));
+      statusOptionsForDropdown.insert(0, {
+        'id': order.idStatus,
+        'name': '$currentStatusLabel (actual)',
+        'locked': true,
+      });
+    }
     final historyItems = _historyAscending();
     final statusPath = _statusPath(order);
 
@@ -766,6 +824,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ),
                 ],
               ),
+              if (order.telefonoPrincipal.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.chat, color: Colors.green),
+                      label: const Text('Contactar por WhatsApp'),
+                      onPressed: () => _openWhatsApp(order.telefonoPrincipal),
+                    ),
+                  ),
+                ),
               if (order.notas.isNotEmpty)
                 _InfoRow(icon: Icons.notes, label: order.notas),
             ]),
@@ -837,14 +907,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ),
                 ),
               ],
-              if (_priceRequest == null || _priceRequest!['estadoSolicitud'] == 'cancelada') ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.price_change_outlined),
-                  label: const Text('Solicitar cambio de precio'),
-                  onPressed: _showPriceRequestDialog,
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.price_change_outlined),
+                label: const Text('Solicitar cambio de precio'),
+                onPressed: null,
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Solicitud de cambio de precio bloqueada temporalmente.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-              ],
+              ),
             ]),
 
             // ── Notas del mensajero ───────────────────────────────────
@@ -932,14 +1007,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               DropdownButtonFormField<int>(
                 value: _selectedStatus,
                 decoration: const InputDecoration(labelText: 'Status'),
-                items: _statusOptions
+                items: statusOptionsForDropdown
                     .map((s) => DropdownMenuItem(
                           value: s['id'] as int,
-                          enabled: (s['id'] as int) != 6 || hasIntento1,
+                          enabled: (s['locked'] as bool? ?? false)
+                              ? false
+                              : (s['id'] as int) != 6 || hasIntento1,
                           child: Text(s['name'] as String),
                         ))
                     .toList(),
-                onChanged: (v) {
+                onChanged: canEditCalificacion ? (v) {
                   if (v == 6 && !hasIntento1) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Primero debes pasar por Intento 1 antes de seleccionar Intento 2')),
@@ -950,8 +1027,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     _selectedStatus = v;
                     _selectedMotivo = null;
                     _selectedExplicacion = null;
+                    if (v != 5 && v != 6) _fechaReagenda = null;
                   });
-                },
+                } : null,
               ),
               if (!hasIntento1)
                 const Padding(
@@ -963,21 +1041,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 ),
               const SizedBox(height: 12),
 
-              // Motivo (condicional)
-              if (motivosFiltrados.isNotEmpty) ...[
+              // Motivo (solo editable para Cancelada)
+              if (motivosCancelada.isNotEmpty) ...[
                 DropdownButtonFormField<int>(
-                  value: _selectedMotivo,
-                  decoration: const InputDecoration(labelText: 'Motivo'),
-                  items: motivosFiltrados
+                  value: _selectedStatus == 4 ? _selectedMotivo : null,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Motivo',
+                    helperText: canEditMotivo ? null : 'Disponible solo cuando el status es Cancelada',
+                  ),
+                  items: motivosCancelada
                       .map((m) => DropdownMenuItem(
                             value: m.id,
-                            child: Text(m.motivo),
+                            child: Text(
+                              m.motivo,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ))
                       .toList(),
-                  onChanged: (v) => setState(() {
-                    _selectedMotivo = v;
-                    _selectedExplicacion = null;
-                  }),
+                  onChanged: canEditMotivo
+                      ? (v) => setState(() {
+                            _selectedMotivo = v;
+                            _selectedExplicacion = null;
+                          })
+                      : null,
                 ),
                 const SizedBox(height: 12),
               ],
@@ -986,57 +1073,79 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               if (explicacionesFiltradas.isNotEmpty) ...[
                 DropdownButtonFormField<int>(
                   value: _selectedExplicacion,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Explicación'),
                   items: explicacionesFiltradas
                       .map((e) => DropdownMenuItem(
                             value: e.id,
-                            child: Text(e.explicacion),
+                            child: Text(
+                              e.explicacion,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ))
                       .toList(),
-                  onChanged: (v) => setState(() => _selectedExplicacion = v),
+                  onChanged: canEditMotivo
+                      ? (v) => setState(() => _selectedExplicacion = v)
+                      : null,
                 ),
                 const SizedBox(height: 12),
               ],
 
-              // Fecha reagenda
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.calendar_today),
-                title: Text(_fechaReagenda == null
-                    ? 'Fecha de reagenda (opcional)'
-                    : 'Reagenda: ${_fechaReagenda!.day}/${_fechaReagenda!.month}/${_fechaReagenda!.year}'),
-                trailing: _fechaReagenda != null
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: isLockedBySuccess
-                            ? null
-                            : () => setState(() => _fechaReagenda = null),
-                      )
-                    : null,
-                onTap: isLockedBySuccess
-                    ? null
-                    : () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now().add(const Duration(days: 1)),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (picked != null) setState(() => _fechaReagenda = picked);
-                },
-              ),
-              if (isLockedBySuccess)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Reagenda bloqueada: la orden ya fue guardada como Exitosa.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
+              // Fecha reagenda (solo disponible para Intento 1 e Intento 2)
+              Builder(builder: (context) {
+                final canEditReagenda = _selectedStatus == 5 || _selectedStatus == 6;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.calendar_today,
+                        color: canEditReagenda ? null : Colors.grey,
+                      ),
+                      title: Text(
+                        _fechaReagenda == null
+                            ? 'Fecha de reagenda (opcional)'
+                            : 'Reagenda: ${_fechaReagenda!.day}/${_fechaReagenda!.month}/${_fechaReagenda!.year}',
+                        style: TextStyle(
+                          color: canEditReagenda ? null : Colors.grey,
+                        ),
+                      ),
+                      trailing: _fechaReagenda != null
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: canEditReagenda
+                                  ? () => setState(() => _fechaReagenda = null)
+                                  : null,
+                            )
+                          : null,
+                      onTap: canEditReagenda
+                          ? () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: DateTime.now().add(const Duration(days: 1)),
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime.now().add(const Duration(days: 365)),
+                              );
+                              if (picked != null) setState(() => _fechaReagenda = picked);
+                            }
+                          : null,
+                    ),
+                    if (!canEditReagenda)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          'La fecha de reagenda solo está disponible para Intento 1 e Intento 2.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ),
+                  ],
+                );
+              }),
 
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: _saving ? null : _save,
+                onPressed: (_saving || !canEditCalificacion) ? null : _save,
                 child: _saving
                     ? const SizedBox(
                         height: 20,
@@ -1046,6 +1155,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       )
                     : const Text('Guardar calificación'),
               ),
+              if (!canEditCalificacion)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Esta orden no puede modificarse porque ya esta en un estatus final.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
             ]),
 
             // ── Historial de calificaciones ─────────────────────────

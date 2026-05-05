@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../providers/backpacks_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/backpacks_service.dart';
+import '../../services/app_sound_service.dart';
 
 class BackpackCreatorScreen extends StatefulWidget {
   const BackpackCreatorScreen({super.key});
@@ -252,6 +253,7 @@ class _QrScanScreenState extends State<_QrScanScreen> {
     if (val.isEmpty) return;
     if (_scanned) return;
     _scanned = true;
+    AppSoundService.playScannerSuccess();
     Navigator.pop(context, val);
   }
 
@@ -276,6 +278,7 @@ class _QrScanScreenState extends State<_QrScanScreen> {
               final barcode = capture.barcodes.firstOrNull;
               if (barcode?.rawValue != null) {
                 _scanned = true;
+                AppSoundService.playScannerSuccess();
                 Navigator.pop(context, barcode!.rawValue);
               }
             },
