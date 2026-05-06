@@ -11,9 +11,6 @@ import 'order_detail_screen.dart';
 
 enum DeliveryFilter { all, pending, enRuta, delivered, incidencias }
 
-const double _kBaseCommissionRate = 0.05;
-const double _kDeliveredBonusRate = 0.02;
-
 class OrdersListScreen extends StatefulWidget {
   const OrdersListScreen({super.key});
 
@@ -25,6 +22,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   final _searchCtrl = TextEditingController();
   DeliveryFilter _activeFilter = DeliveryFilter.all;
   bool _didInitialLoad = false;
+  bool _bootstrapping = true;
 
   bool _isAdminOrLeader(AuthProvider auth) {
     final type = auth.user?.type.toLowerCase() ?? '';
@@ -119,12 +117,26 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       }
 
       if (activeBackpacks.isNotEmpty) {
-        await backpacksProvider.loadMapItems(
-          isAdmin: false,
-          userId: auth.user!.idUsuario,
-          idRepartidor: activeBackpacks.first.idRepartidor,
-          idBackpackIds: activeBackpacks.map((b) => b.id).toList(),
-        );
+        final activeBackpackIds = activeBackpacks.map((b) => b.id).toList();
+
+        // Reintentos silenciosos para evitar estado vacío transitorio al entrar.
+        for (int attempt = 0; attempt < 3; attempt++) {
+          await backpacksProvider.loadMapItems(
+            isAdmin: false,
+            userId: auth.user!.idUsuario,
+            idRepartidor: activeBackpacks.first.idRepartidor,
+            idBackpackIds: activeBackpackIds,
+          );
+          if (!mounted) return;
+
+          final currentIds = _activeBackpackOrderIds(backpacksProvider);
+          if (currentIds.isNotEmpty) break;
+
+          if (attempt < 2) {
+            await Future.delayed(const Duration(milliseconds: 350));
+          }
+        }
+
         if (kDebugMode) {
           debugPrint('[ENTREGAS] _loadOrdersWithEquipos: after loadMapItems items=${backpacksProvider.selectedItems.length}');
         }
@@ -151,7 +163,10 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       _didInitialLoad = true;
       final auth = context.read<AuthProvider>();
       final ordersProvider = context.read<OrdersProvider>();
-      _loadOrdersWithEquipos(auth, ordersProvider);
+      _loadOrdersWithEquipos(auth, ordersProvider).whenComplete(() {
+        if (!mounted) return;
+        setState(() => _bootstrapping = false);
+      });
     });
   }
 
@@ -261,7 +276,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Comisión estimada del día: ${_money(commissionSummary.payableNow + commissionSummary.pending)}',
+                      'Comisión estimada: ${_money(commissionSummary.totalCommission)} (${commissionSummary.successRate.toStringAsFixed(0)}% cobertura)',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -338,7 +353,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
         // Lista
         Expanded(
-          child: ordersProvider.loading
+            child: (ordersProvider.loading || _bootstrapping)
               ? _buildShimmer()
               : RefreshIndicator(
                   onRefresh: () => _loadOrdersWithEquipos(auth, ordersProvider),
@@ -355,7 +370,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                           itemBuilder: (ctx, i) =>
                               _OrderCard(
                           order: visibleOrders[i],
-                          commission: _estimatedCommission(visibleOrders[i]),
+                          commissionFlat: _isDelivered(visibleOrders[i].idStatus) ? commissionSummary.commissionFlat : 0,
                           isDelivered: _isDelivered(visibleOrders[i].idStatus),
                           isIncidencia: _isIncidencia(visibleOrders[i].idStatus),
                               ),
@@ -496,19 +511,12 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   bool _isEnRuta(int status) => status == 3 || status == 7;
   bool _isIncidencia(int status) => status == 4 || status == 5 || status == 6;
 
-  double _baseCommission(OrderModel order) {
-    if (_isIncidencia(order.idStatus)) return 0;
-    return order.total * _kBaseCommissionRate;
-  }
-
-  double _bonusCommission(OrderModel order) {
-    if (!_isDelivered(order.idStatus)) return 0;
-    return order.total * _kDeliveredBonusRate;
-  }
-
-  double _estimatedCommission(OrderModel order) {
-    if (_isIncidencia(order.idStatus)) return 0;
-    return _baseCommission(order) + _bonusCommission(order);
+  double _commissionPerOrder(int totalOrders, int deliveredCount) {
+    if (totalOrders == 0) return 0;
+    final rate = deliveredCount / totalOrders * 100;
+    if (rate >= 60) return 110;
+    if (rate >= 55) return 100;
+    return 90;
   }
 
   int _priorityRank(int status) {
@@ -523,38 +531,34 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   }
 
   _CommissionSummary _buildCommissionSummary(List<OrderModel> orders) {
-    double payableNow = 0;
-    double pending = 0;
-    double riskAmount = 0;
-    double baseTotal = 0;
-    double bonusTotal = 0;
+    final totalOrders = orders.length;
+    final deliveredCount = orders.where((o) => _isDelivered(o.idStatus)).length;
+    final successRate = totalOrders > 0 ? deliveredCount / totalOrders * 100 : 0.0;
+    final commissionFlat = _commissionPerOrder(totalOrders, deliveredCount);
+    final totalCommission = commissionFlat * deliveredCount;
+
+    double grandTotal = 0;
+    double collected = 0;
+    double pendingCollect = 0;
 
     for (final o in orders) {
-      final base = _baseCommission(o);
-      final bonus = _bonusCommission(o);
-      final total = base + bonus;
-
-      baseTotal += base;
-      bonusTotal += bonus;
-
-      if (_isIncidencia(o.idStatus)) {
-        riskAmount += o.total;
-        continue;
-      }
-
+      grandTotal += o.total;
       if (_isDelivered(o.idStatus)) {
-        payableNow += total;
-      } else {
-        pending += total;
+        collected += o.total;
+      } else if (!_isIncidencia(o.idStatus)) {
+        pendingCollect += o.total;
       }
     }
 
     return _CommissionSummary(
-      payableNow: payableNow,
-      pending: pending,
-      riskAmount: riskAmount,
-      baseTotal: baseTotal,
-      bonusTotal: bonusTotal,
+      totalOrders: totalOrders,
+      deliveredCount: deliveredCount,
+      successRate: successRate,
+      commissionFlat: commissionFlat,
+      totalCommission: totalCommission,
+      grandTotal: grandTotal,
+      collected: collected,
+      pendingCollect: pendingCollect,
     );
   }
 
@@ -580,13 +584,13 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
 class _OrderCard extends StatelessWidget {
   final OrderModel order;
-  final double commission;
+  final double commissionFlat;
   final bool isDelivered;
   final bool isIncidencia;
 
   const _OrderCard({
     required this.order,
-    required this.commission,
+    required this.commissionFlat,
     required this.isDelivered,
     required this.isIncidencia,
   });
@@ -693,8 +697,8 @@ class _OrderCard extends StatelessWidget {
               isIncidencia
                   ? 'Comisión en riesgo por incidencia'
                   : isDelivered
-                      ? 'Comisión acreditable: \$${commission.toStringAsFixed(2)}'
-                      : 'Comisión pendiente: \$${commission.toStringAsFixed(2)}',
+                        ? 'Comisión acreditable: \$${commissionFlat.toStringAsFixed(0)}'
+                        : 'Comisión pot.: \$${commissionFlat.toStringAsFixed(0)} al entregar',
               style: TextStyle(
                 fontSize: 11,
                 color: isIncidencia
@@ -718,7 +722,7 @@ class _OrderCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'Com. \$${commission.toStringAsFixed(0)}',
+              'Com. \$${commissionFlat.toStringAsFixed(0)}',
               style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ],
@@ -789,18 +793,24 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _CommissionSummary {
-  final double payableNow;
-  final double pending;
-  final double riskAmount;
-  final double baseTotal;
-  final double bonusTotal;
+  final int totalOrders;
+  final int deliveredCount;
+  final double successRate;
+  final double commissionFlat;    // 0, 90, 100 o 110 por entrega exitosa
+  final double totalCommission;   // commissionFlat × deliveredCount
+  final double grandTotal;        // suma de totales de TODAS las órdenes
+  final double collected;         // suma de totales de órdenes exitosas (ya recolectado)
+  final double pendingCollect;    // suma de totales de órdenes pendientes/en ruta
 
   _CommissionSummary({
-    required this.payableNow,
-    required this.pending,
-    required this.riskAmount,
-    required this.baseTotal,
-    required this.bonusTotal,
+    required this.totalOrders,
+    required this.deliveredCount,
+    required this.successRate,
+    required this.commissionFlat,
+    required this.totalCommission,
+    required this.grandTotal,
+    required this.collected,
+    required this.pendingCollect,
   });
 }
 
@@ -812,58 +822,169 @@ class _CommissionBoard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final rateStr = '${summary.successRate.toStringAsFixed(0)}%';
+    final tierLabel = summary.commissionFlat > 0
+        ? '\$${summary.commissionFlat.toStringAsFixed(0)} / entrega'
+      : 'Sin datos';
+    final tierColor = summary.commissionFlat >= 110
+        ? Colors.greenAccent
+        : summary.commissionFlat >= 100
+            ? Colors.lightGreenAccent
+            : summary.commissionFlat >= 90
+                ? Colors.yellowAccent
+                : Colors.redAccent;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0F766E), Color(0xFF115E59)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Control de Comisiones',
-            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Cobrable hoy: ${money(summary.payableNow)}',
-            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
+          // Encabezado: cobertura y nivel de comisión
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Pendiente: ${money(summary.pending)}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+              const Text(
+                'Comisión por Cobertura',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              Expanded(
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Text(
-                  'Bono: ${money(summary.bonusTotal)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  '${summary.deliveredCount}/${summary.totalOrders} entregas · $rateStr',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ),
-              Expanded(
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Tasa activa y comisión total
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                money(summary.totalCommission),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  'Riesgo: ${money(summary.riskAmount)}',
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  'comisión total',
+                  style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: tierColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: tierColor.withOpacity(0.6)),
+                ),
+                child: Text(
+                  tierLabel,
+                  style: TextStyle(
+                    color: tierColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: Colors.white24, height: 1),
+          const SizedBox(height: 10),
+          // 3 métricas: a entregar, recolectado, pendiente
+          Row(
+            children: [
+              _MetricItem(
+                label: 'Total a entregar',
+                value: money(summary.grandTotal),
+                icon: Icons.inventory_2_outlined,
+                color: Colors.white,
+              ),
+              _MetricItem(
+                label: 'Ya recolectado',
+                value: money(summary.collected),
+                icon: Icons.check_circle_outline,
+                color: Colors.greenAccent,
+              ),
+              _MetricItem(
+                label: 'Pendiente',
+                value: money(summary.pendingCollect),
+                icon: Icons.hourglass_top_outlined,
+                color: Colors.orangeAccent,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricItem extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _MetricItem({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 12, color: color.withOpacity(0.8)),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(color: color.withOpacity(0.75), fontSize: 10),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 2),
           Text(
-            'Base generada: ${money(summary.baseTotal)}',
-            style: const TextStyle(color: Colors.white60, fontSize: 11),
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),

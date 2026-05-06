@@ -518,15 +518,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
       return;
     }
-    if ((_selectedStatus == 5 || _selectedStatus == 6) && _selectedMotivo == null) {
+    if ((_selectedStatus == 4 || _selectedStatus == 5 || _selectedStatus == 6) && _selectedMotivo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Para Intento 1/2 debes seleccionar un motivo')),
+        const SnackBar(content: Text('Para Cancelada/Intento 1/2 debes seleccionar un motivo')),
       );
       return;
     }
-    if ((_selectedStatus == 5 || _selectedStatus == 6) && _selectedExplicacion == null) {
+    if ((_selectedStatus == 4 || _selectedStatus == 5 || _selectedStatus == 6) && _selectedExplicacion == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Para Intento 1/2 debes seleccionar una explicación')),
+        const SnackBar(content: Text('Para Cancelada/Intento 1/2 debes seleccionar una explicación')),
       );
       return;
     }
