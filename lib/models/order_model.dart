@@ -26,6 +26,7 @@ class OrderModel {
   final String explicacionMotivo;
   final String fechaPedido;
   final String fechaEntrega;
+  final String fechaReagendaProgramada;
   final String? latitud;
   final String? longitud;
   final String? metros;
@@ -59,6 +60,7 @@ class OrderModel {
     required this.explicacionMotivo,
     required this.fechaPedido,
     required this.fechaEntrega,
+    this.fechaReagendaProgramada = '',
     this.latitud,
     this.longitud,
     this.metros,
@@ -73,6 +75,7 @@ class OrderModel {
     String? longitud,
     String? metros,
     String? tiempo,
+    String? fechaReagendaProgramada,
   }) {
     return OrderModel(
       id: id,
@@ -102,6 +105,7 @@ class OrderModel {
       explicacionMotivo: explicacionMotivo,
       fechaPedido: fechaPedido,
       fechaEntrega: fechaEntrega,
+      fechaReagendaProgramada: fechaReagendaProgramada ?? this.fechaReagendaProgramada,
       latitud: latitud ?? this.latitud,
       longitud: longitud ?? this.longitud,
       metros: metros ?? this.metros,
@@ -128,7 +132,10 @@ class OrderModel {
         descripcionFachada: _asString(json['descripcionFachada'] ?? json['DescripcionFachada']),
         notas: _asString(json['notas'] ?? json['Notas']),
         total: _asDouble(json['total'] ?? json['Total']),
-        observacionesMensajero: json['observacionesMensajero']?.toString(),
+        observacionesMensajero: (json['observacionesMensajero'] ??
+            json['ObservacionesMensajero'] ??
+            json['observaciones_mensajero'])
+          ?.toString(),
         idStatus: _asInt(json['idStatus'] ?? json['IdStatus']),
         idMotivoStatus: _asInt(json['idMotivoStatus'] ?? json['IdMotivoStatus']),
         idExplicacionMotivo:
@@ -138,6 +145,12 @@ class OrderModel {
         explicacionMotivo: _asString(json['ExplicacionMotivo'] ?? json['explicacionMotivo']),
         fechaPedido: _asString(json['fechaPedido'] ?? json['FechaPedido']),
         fechaEntrega: _asString(json['fechaEntrega'] ?? json['FechaEntrega']),
+        fechaReagendaProgramada: _asString(
+          json['fechaReagendaProgramada'] ??
+              json['FechaReagendaProgramada'] ??
+              json['fechaReagenda'] ??
+              json['FechaReagenda'],
+        ),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
         metros: json['Metros']?.toString() ?? json['metros']?.toString(),

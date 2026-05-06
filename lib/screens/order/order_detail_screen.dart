@@ -74,6 +74,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return 'Status $id';
   }
 
+  DateTime? _parseReagendaDate(String value) {
+    final raw = value.trim();
+    if (raw.isEmpty) return null;
+
+    final normalized = raw.length >= 10 ? raw.substring(0, 10) : raw;
+    try {
+      return DateTime.parse(normalized);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _loadData() async {
     final auth = context.read<AuthProvider>();
     await context.read<OrdersProvider>().selectOrder(widget.orderId, auth.equiposForQuery);
@@ -86,6 +98,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         _selectedStatus = order.idStatus > 0 ? order.idStatus : null;
         _selectedMotivo = order.idMotivoStatus > 0 ? order.idMotivoStatus : null;
         _selectedExplicacion = order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : null;
+        _fechaReagenda = _parseReagendaDate(order.fechaReagendaProgramada);
       }
       setState(() {});
     }
@@ -327,7 +340,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       final svc = ApiService();
       await svc.put(ApiConfig.orderNotes(widget.orderId), {'observacionesMensajero': notes});
-      if (mounted) setState(() => _notesSaved = true);
+      final auth = context.read<AuthProvider>();
+      await context.read<OrdersProvider>().selectOrder(widget.orderId, auth.equiposForQuery);
+      final refreshed = context.read<OrdersProvider>().selectedOrder;
+      if (refreshed != null) {
+        _notesCtrl.text = refreshed.observacionesMensajero ?? notes;
+      }
+      if (mounted) {
+        setState(() => _notesSaved = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notas guardadas correctamente'), backgroundColor: Colors.green),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al guardar notas: $e')));
@@ -494,15 +518,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
       return;
     }
+    if ((_selectedStatus == 5 || _selectedStatus == 6) && _selectedMotivo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Para Intento 1/2 debes seleccionar un motivo')),
+      );
+      return;
+    }
+    if ((_selectedStatus == 5 || _selectedStatus == 6) && _selectedExplicacion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Para Intento 1/2 debes seleccionar una explicación')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     bool ok = false;
     String? saveError;
     final sameStatusAsCurrent = order != null && _selectedStatus == order.idStatus;
-    final isCancelada = _selectedStatus == 4;
-    final motivoToSave = isCancelada
-      ? (_selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0))
+    final usesMotivo = _selectedStatus != null && [1, 4, 5, 6, 7].contains(_selectedStatus);
+    final motivoToSave = usesMotivo
+      ? (_selectedStatus == 1
+          ? 1
+          : (_selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0)))
       : 0;
-    final explicacionToSave = isCancelada
+    final explicacionToSave = usesMotivo
       ? (_selectedExplicacion ?? (sameStatusAsCurrent && order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : 0))
       : 0;
     try {
@@ -512,7 +550,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             idUsuario: auth.user!.idUsuario,
             motivoStatus: motivoToSave,
             explicacionMotivo: explicacionToSave,
-            fechaReagenda: _fechaReagenda?.toIso8601String(),
+            fechaReagenda: _fechaReagenda == null
+                ? null
+                : '${_fechaReagenda!.year.toString().padLeft(4, '0')}-${_fechaReagenda!.month.toString().padLeft(2, '0')}-${_fechaReagenda!.day.toString().padLeft(2, '0')}',
           );
     } on ApiException catch (e) {
       saveError = e.message;
@@ -581,15 +621,39 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _openWhatsApp(String phone) async {
     final normalized = _normalizeWhatsappPhone(phone);
-    final uri = Uri.parse('https://wa.me/$normalized');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-      return;
+
+    final candidates = <Uri>[
+      Uri.parse('whatsapp://send?phone=+$normalized'),
+      Uri.parse('whatsapp://send?phone=$normalized'),
+      Uri.parse('https://api.whatsapp.com/send?phone=$normalized'),
+      Uri.parse('https://wa.me/$normalized'),
+    ];
+
+    for (final uri in candidates) {
+      try {
+        final openedNonBrowser = await launchUrl(
+          uri,
+          mode: LaunchMode.externalNonBrowserApplication,
+        );
+        if (openedNonBrowser) return;
+      } catch (_) {
+        // Continuar con el siguiente fallback.
+      }
+
+      try {
+        final openedExternal = await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        );
+        if (openedExternal) return;
+      } catch (_) {
+        // Continuar con el siguiente fallback.
+      }
     }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('No se pudo abrir WhatsApp en este dispositivo')),
+      const SnackBar(content: Text('WhatsApp no está instalado. Instálalo desde Play Store para usar esta función.')),
     );
   }
 
@@ -731,10 +795,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     }
 
-    final motivosCancelada = _motivos.where((m) => m.idStatus == 4).toList();
-    final isLockedByFinalStatus = order.idStatus == 1 || order.idStatus == 4;
+    final motivosPorStatusSeleccionado = _selectedStatus == null
+      ? <MotivoStatusModel>[]
+      : _motivos.where((m) => m.idStatus == _selectedStatus).toList();
+    final isLockedByFinalStatus = order.idStatus == 1;
     final canEditCalificacion = !isLockedByFinalStatus;
-    final canEditMotivo = canEditCalificacion && _selectedStatus == 4;
+    final canEditMotivo = canEditCalificacion && [4, 5, 6, 7].contains(_selectedStatus);
     final explicacionesFiltradas = canEditMotivo
       ? _explicaciones.where((e) => e.idMotivo == _selectedMotivo).toList()
       : <MotivoExplicacionModel>[];
@@ -1025,8 +1091,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   }
                   setState(() {
                     _selectedStatus = v;
-                    _selectedMotivo = null;
-                    _selectedExplicacion = null;
+                    if (v == 1) {
+                      _selectedMotivo = 1;
+                      _selectedExplicacion = null;
+                    } else {
+                      _selectedMotivo = null;
+                      _selectedExplicacion = null;
+                    }
                     if (v != 5 && v != 6) _fechaReagenda = null;
                   });
                 } : null,
@@ -1041,16 +1112,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 ),
               const SizedBox(height: 12),
 
-              // Motivo (solo editable para Cancelada)
-              if (motivosCancelada.isNotEmpty) ...[
+              // Motivo (editable para el status seleccionado)
+              if (motivosPorStatusSeleccionado.isNotEmpty) ...[
                 DropdownButtonFormField<int>(
-                  value: _selectedStatus == 4 ? _selectedMotivo : null,
+                  value: _selectedMotivo,
                   isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Motivo',
-                    helperText: canEditMotivo ? null : 'Disponible solo cuando el status es Cancelada',
+                    helperText: canEditMotivo 
+                        ? null 
+                        : 'Selecciona un status para habilitar motivos',
                   ),
-                  items: motivosCancelada
+                  items: motivosPorStatusSeleccionado
                       .map((m) => DropdownMenuItem(
                             value: m.id,
                             child: Text(
@@ -1159,7 +1232,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const Padding(
                   padding: EdgeInsets.only(top: 6),
                   child: Text(
-                    'Esta orden no puede modificarse porque ya esta en un estatus final.',
+                    'Esta orden no puede modificarse porque ya ha sido entregada exitosamente.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
