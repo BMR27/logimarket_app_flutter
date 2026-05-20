@@ -4,11 +4,15 @@ import 'providers/auth_provider.dart';
 import 'providers/orders_provider.dart';
 import 'providers/backpacks_provider.dart';
 import 'providers/map_navigation_provider.dart';
+import 'services/location_tracking_service.dart';
 import 'utils/app_theme.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/login/login_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Inicializar el foreground task service una sola vez al arrancar.
+  LocationTrackingService.init();
   runApp(const LogimarketApp());
 }
 
