@@ -4,6 +4,7 @@ import '../models/user_model.dart';
 import '../models/equipo_model.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/location_tracking_service.dart';
 
 enum AuthState { unknown, authenticated, unauthenticated }
 
@@ -33,6 +34,34 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // Evita romper la sesion; el consumidor decide como proceder si sigue vacio.
+    }
+    // Si el tracker se detuvo mientras la app estaba en background, reiniciarlo.
+    if (_user != null && !LocationTrackingService.instance.isTracking) {
+      _autoStartTracking(_user!);
+    }
+  }
+
+  /// Devuelve true si el usuario es mensajero (no admin ni lider).
+  bool _isMensajero(UserModel user) {
+    final t = user.type.toLowerCase();
+    return t != 'admin' && t != 'lider';
+  }
+
+  /// Arranca el tracking de ubicación en background si el usuario es mensajero.
+  /// No lanza excepción — falla silenciosa para no bloquear el flujo de auth.
+  Future<void> _autoStartTracking(UserModel user) async {
+    if (!_isMensajero(user)) return;
+    try {
+      final token = await ApiService.getToken();
+      if (token == null) return;
+      await LocationTrackingService.instance.start(
+        idMensajero: user.idUsuario,
+        token: token,
+        enViaje: false,
+      );
+      debugPrint('[Auth] auto-tracking started for mensajero ${user.idUsuario}');
+    } catch (e) {
+      debugPrint('[Auth] auto-tracking start error: $e');
     }
   }
 
@@ -74,6 +103,8 @@ class AuthProvider extends ChangeNotifier {
         } else {
           // Autenticar inmediatamente para no bloquear el splash.
           _state = AuthState.authenticated;
+          // Arrancar tracking automático si es mensajero.
+          _autoStartTracking(_user!);
           // Cargar equipos en background; si falla NO cerrar sesión —
           // ensureEquiposLoaded() los reintentará cuando el usuario haga una acción.
           _service.getEquipos(_user!.idUsuario).then((eq) {
@@ -103,6 +134,8 @@ class AuthProvider extends ChangeNotifier {
       _state = AuthState.authenticated;
       _loading = false;
       notifyListeners();
+      // Arrancar tracking automático si es mensajero.
+      _autoStartTracking(_user!);
       return true;
     } on ApiException catch (e) {
       _errorMessage = e.message;
@@ -118,6 +151,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await LocationTrackingService.instance.stop();
     await _service.logout();
     _user = null;
     _equipos = [];
