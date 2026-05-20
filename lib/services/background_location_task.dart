@@ -66,7 +66,22 @@ class _LocationTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp) async {
-    debugPrint('[BgTask] onDestroy');
+    debugPrint('[BgTask] onDestroy — limpiando ubicación del backend');
+    final prefs = await SharedPreferences.getInstance();
+    final idMensajero = prefs.getInt(kPrefsMensajero);
+    final token       = prefs.getString(kPrefsToken);
+    final apiUrl      = prefs.getString(kPrefsApiUrl);
+    if (idMensajero != null && token != null && apiUrl != null) {
+      try {
+        await http.delete(
+          Uri.parse('$apiUrl/$idMensajero'),
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 5));
+        debugPrint('[BgTask] ubicación eliminada del backend');
+      } catch (e) {
+        debugPrint('[BgTask] error limpiando ubicación: $e');
+      }
+    }
   }
 
 }

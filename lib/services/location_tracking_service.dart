@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
 import 'background_location_task.dart';
@@ -129,18 +130,38 @@ class LocationTrackingService {
     debugPrint('[LocationTracking] trip updated idOrden=$idOrden enViaje=$enViaje');
   }
 
-  /// Detiene el foreground service.
+  /// Detiene el foreground service y borra la ubicación del backend.
   Future<void> stop() async {
+    // Leer prefs ANTES de borrarlos para poder llamar al DELETE
+    final prefs = await SharedPreferences.getInstance();
+    final idMensajero = prefs.getInt(kPrefsMensajero);
+    final token       = prefs.getString(kPrefsToken);
+    final apiUrl      = prefs.getString(kPrefsApiUrl);
+
     await FlutterForegroundTask.stopService();
     _isRunning = false;
     _enViaje   = false;
     _idOrden   = null;
-    final prefs = await SharedPreferences.getInstance();
+
     await prefs.remove(kPrefsMensajero);
     await prefs.remove(kPrefsToken);
     await prefs.remove(kPrefsIdOrden);
     await prefs.remove(kPrefsEnViaje);
     await prefs.remove(kPrefsApiUrl);
+
+    // Borrar del backend para que desaparezca del mapa de inmediato
+    if (idMensajero != null && token != null && apiUrl != null) {
+      try {
+        await http.delete(
+          Uri.parse('$apiUrl/$idMensajero'),
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 5));
+        debugPrint('[LocationTracking] ubicación eliminada del backend');
+      } catch (e) {
+        debugPrint('[LocationTracking] error al eliminar ubicación: $e');
+      }
+    }
+
     debugPrint('[LocationTracking] stopped');
   }
 }
