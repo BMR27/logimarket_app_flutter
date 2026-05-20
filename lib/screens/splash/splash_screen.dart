@@ -72,9 +72,13 @@ class _SplashScreenState extends State<SplashScreen>
     _dotsController.forward();
 
     final auth = context.read<AuthProvider>();
+    // Esperar máximo 20 segundos; si checkSession no responde, forzar estado
+    const maxWait = Duration(seconds: 20);
+    final deadline = DateTime.now().add(maxWait);
     while (auth.state == AuthState.unknown) {
       await Future.delayed(const Duration(milliseconds: 80));
       if (!mounted) return;
+      if (DateTime.now().isAfter(deadline)) break;
     }
 
     await Future.delayed(const Duration(milliseconds: 400));
@@ -165,21 +169,21 @@ class _SplashScreenState extends State<SplashScreen>
                   child: const Column(
                     children: [
                       Text(
-                        'LOGIMARKET',
+                        'Next Os Delivery',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 4.0,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
                         ),
                       ),
                       SizedBox(height: 6),
                       Text(
-                        'DELIVERY APP',
+                        'Logimarket',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 13,
-                          letterSpacing: 3.0,
+                          letterSpacing: 1.0,
                           fontWeight: FontWeight.w300,
                         ),
                       ),

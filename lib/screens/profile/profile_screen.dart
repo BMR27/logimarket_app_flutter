@@ -6,6 +6,7 @@ import '../../services/api_service.dart';
 import '../../services/app_sound_service.dart';
 import '../../config/api_config.dart';
 import '../../utils/app_theme.dart';
+import '../legal/privacy_policy_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -271,19 +272,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _SectionHeader(title: 'Acerca de'),
         Card(
           child: Column(
-            children: const [
-              ListTile(
+            children: [
+              const ListTile(
                 leading: Icon(Icons.info_outline),
                 title: Text('Versión'),
                 trailing:
                     Text('1.0.0', style: TextStyle(color: Colors.grey)),
               ),
-              Divider(height: 0),
-              ListTile(
+              const Divider(height: 0),
+              const ListTile(
                 leading: Icon(Icons.business),
                 title: Text('Desarrollado por'),
-                trailing: Text('Quantum Nest',
+                trailing: Text('Logimarket',
                     style: TextStyle(color: Colors.grey)),
+              ),
+              const Divider(height: 0),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Política de Privacidad'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const PrivacyPolicyScreen(),
+                    ),
+                  );
+                },
               ),
             ],
           ),

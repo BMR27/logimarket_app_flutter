@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -23,77 +24,61 @@ class ApiService {
 
   Future<dynamic> get(String url) async {
     try {
-      final response = await http.get(Uri.parse(url), headers: await _headers());
+      final response = await http
+          .get(Uri.parse(url), headers: await _headers())
+          .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
     } on SocketException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'Sin conexion a internet',
-      );
+      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
+    } on TimeoutException {
+      throw ApiException(statusCode: 0, message: 'El servidor no responde');
     } on http.ClientException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'No se pudo conectar con el servidor',
-      );
+      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
     }
   }
 
   Future<dynamic> post(String url, Map<String, dynamic> body) async {
     try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: await _headers(),
-        body: jsonEncode(body),
-      );
+      final response = await http
+          .post(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
+          .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
     } on SocketException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'Sin conexion a internet',
-      );
+      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
+    } on TimeoutException {
+      throw ApiException(statusCode: 0, message: 'El servidor no responde');
     } on http.ClientException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'No se pudo conectar con el servidor',
-      );
+      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
     }
   }
 
   Future<dynamic> put(String url, Map<String, dynamic> body) async {
     try {
-      final response = await http.put(
-        Uri.parse(url),
-        headers: await _headers(),
-        body: jsonEncode(body),
-      );
+      final response = await http
+          .put(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
+          .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
     } on SocketException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'Sin conexion a internet',
-      );
+      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
+    } on TimeoutException {
+      throw ApiException(statusCode: 0, message: 'El servidor no responde');
     } on http.ClientException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'No se pudo conectar con el servidor',
-      );
+      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
     }
   }
 
   Future<dynamic> delete(String url) async {
     try {
-      final response = await http.delete(Uri.parse(url), headers: await _headers());
+      final response = await http
+          .delete(Uri.parse(url), headers: await _headers())
+          .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
     } on SocketException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'Sin conexion a internet',
-      );
+      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
+    } on TimeoutException {
+      throw ApiException(statusCode: 0, message: 'El servidor no responde');
     } on http.ClientException {
-      throw ApiException(
-        statusCode: 0,
-        message: 'No se pudo conectar con el servidor',
-      );
+      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
     }
   }
 
@@ -122,7 +107,9 @@ class ApiService {
     if (parsed is Map<String, dynamic> && parsed['error'] != null) {
       message = parsed['error'].toString();
     } else if (parsed is String && parsed.trim().isNotEmpty) {
-      message = parsed.trim();
+      final trimmed = parsed.trim();
+      // Avoid showing raw HTML error pages (e.g. Express 404 pages)
+      message = trimmed.startsWith('<') ? 'Error del servidor (${response.statusCode})' : trimmed;
     }
 
     throw ApiException(

@@ -67,6 +67,41 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     7: 'Por Calificar',
   };
 
+  bool _isStatusCalificacionValido(int? statusId) =>
+      statusId != null && const [1, 4, 5, 6].contains(statusId);
+
+  bool _requiresExplicacion(int? statusId) =>
+      statusId != null && const [4, 5, 6].contains(statusId);
+
+  bool _isCobroExitoso(MotivoStatusModel motivo) {
+    final text = motivo.motivo.trim().toLowerCase();
+    return text.contains('cobro') && text.contains('exitos');
+  }
+
+  List<MotivoStatusModel> _motivosForStatus(int? statusId) {
+    if (!_isStatusCalificacionValido(statusId) || statusId == null) {
+      return const <MotivoStatusModel>[];
+    }
+
+    final motivos = _motivos.where((m) => m.idStatus == statusId).toList();
+    if (statusId != 1) return motivos;
+
+    final cobroExitoso = motivos.where(_isCobroExitoso).toList();
+    return cobroExitoso.isNotEmpty
+      ? cobroExitoso
+        : motivos;
+  }
+
+  int? _defaultMotivoForStatus(int? statusId) {
+    final motivos = _motivosForStatus(statusId);
+    if (motivos.isEmpty) return null;
+    if (statusId == 1) {
+      final exacto = motivos.where(_isCobroExitoso).toList();
+      if (exacto.isNotEmpty) return exacto.first.id;
+    }
+    return motivos.first.id;
+  }
+
   String _statusNameById(int id) {
     if (_statusDisplayNames.containsKey(id)) return _statusDisplayNames[id]!;
     final found = _statusOptions.where((s) => s['id'] == id).toList();
@@ -133,7 +168,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   void _syncMotivoSelectionFromOrder(OrderModel order) {
     if (_selectedStatus == null) return;
 
-    final motivosForStatus = _motivos.where((m) => m.idStatus == _selectedStatus).toList();
+    if (!_isStatusCalificacionValido(_selectedStatus)) {
+      if (_selectedMotivo != null || _selectedExplicacion != null) {
+        setState(() {
+          _selectedMotivo = null;
+          _selectedExplicacion = null;
+        });
+      }
+      return;
+    }
+
+    final motivosForStatus = _motivosForStatus(_selectedStatus);
     if (motivosForStatus.isEmpty) return;
 
     final motivoIds = motivosForStatus.map((m) => m.id).toSet();
@@ -153,7 +198,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
     int? resolvedExplicacion = _selectedExplicacion;
     if (resolvedMotivo != null) {
-      final expForMotivo = _explicaciones.where((e) => e.idMotivo == resolvedMotivo).toList();
+      final expForMotivo = _requiresExplicacion(_selectedStatus)
+          ? _explicaciones.where((e) => e.idMotivo == resolvedMotivo).toList()
+          : <MotivoExplicacionModel>[];
       final expIds = expForMotivo.map((e) => e.id).toSet();
 
       if (resolvedExplicacion == null || !expIds.contains(resolvedExplicacion)) {
@@ -167,6 +214,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           }
         }
       }
+    }
+
+    if (_selectedStatus == 1 && resolvedMotivo == null) {
+      resolvedMotivo = _defaultMotivoForStatus(1);
     }
 
     if (resolvedMotivo != _selectedMotivo || resolvedExplicacion != _selectedExplicacion) {
@@ -512,37 +563,37 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
       return;
     }
+    if (!_isStatusCalificacionValido(_selectedStatus)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona un status valido para calificar la entrega')),
+      );
+      return;
+    }
     if (_selectedStatus == 6 && !_hasIntento1Step(order)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No puedes marcar Intento 2 sin haber pasado antes por Intento 1')),
       );
       return;
     }
-    if ((_selectedStatus == 4 || _selectedStatus == 5 || _selectedStatus == 6) && _selectedMotivo == null) {
+    if (_selectedMotivo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Para Cancelada/Intento 1/2 debes seleccionar un motivo')),
+        const SnackBar(content: Text('Debes seleccionar un motivo para continuar')),
       );
       return;
     }
-    if ((_selectedStatus == 4 || _selectedStatus == 5 || _selectedStatus == 6) && _selectedExplicacion == null) {
+    if (_requiresExplicacion(_selectedStatus) && _selectedExplicacion == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Para Cancelada/Intento 1/2 debes seleccionar una explicación')),
+        const SnackBar(content: Text('Debes seleccionar una explicación para continuar')),
       );
       return;
     }
     setState(() => _saving = true);
     bool ok = false;
     String? saveError;
-    final sameStatusAsCurrent = order != null && _selectedStatus == order.idStatus;
-    final usesMotivo = _selectedStatus != null && [1, 4, 5, 6, 7].contains(_selectedStatus);
-    final motivoToSave = usesMotivo
-      ? (_selectedStatus == 1
-          ? 1
-          : (_selectedMotivo ?? (sameStatusAsCurrent && order.idMotivoStatus > 0 ? order.idMotivoStatus : 0)))
-      : 0;
-    final explicacionToSave = usesMotivo
-      ? (_selectedExplicacion ?? (sameStatusAsCurrent && order.idExplicacionMotivo > 0 ? order.idExplicacionMotivo : 0))
-      : 0;
+    final motivoToSave = _selectedMotivo ?? 0;
+    final explicacionToSave = _requiresExplicacion(_selectedStatus)
+        ? (_selectedExplicacion ?? 0)
+        : 0;
     try {
       ok = await context.read<OrdersProvider>().updateOrder(
             idOrden: widget.orderId,
@@ -795,13 +846,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
     }
 
-    final motivosPorStatusSeleccionado = _selectedStatus == null
-      ? <MotivoStatusModel>[]
-      : _motivos.where((m) => m.idStatus == _selectedStatus).toList();
+    final motivosPorStatusSeleccionado = _motivosForStatus(_selectedStatus);
     final isLockedByFinalStatus = order.idStatus == 1;
     final canEditCalificacion = !isLockedByFinalStatus;
-    final canEditMotivo = canEditCalificacion && [4, 5, 6, 7].contains(_selectedStatus);
-    final explicacionesFiltradas = canEditMotivo
+    final canEditMotivo = canEditCalificacion && _isStatusCalificacionValido(_selectedStatus) && _selectedStatus != 1;
+    final explicacionesFiltradas = canEditMotivo && _requiresExplicacion(_selectedStatus)
       ? _explicaciones.where((e) => e.idMotivo == _selectedMotivo).toList()
       : <MotivoExplicacionModel>[];
     final hasIntento1 = _hasIntento1Step(order);
@@ -1091,13 +1140,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   }
                   setState(() {
                     _selectedStatus = v;
-                    if (v == 1) {
-                      _selectedMotivo = 1;
-                      _selectedExplicacion = null;
-                    } else {
-                      _selectedMotivo = null;
-                      _selectedExplicacion = null;
-                    }
+                    _selectedMotivo = _defaultMotivoForStatus(v);
+                    _selectedExplicacion = null;
                     if (v != 5 && v != 6) _fechaReagenda = null;
                   });
                 } : null,
@@ -1119,9 +1163,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Motivo',
-                    helperText: canEditMotivo 
-                        ? null 
-                        : 'Selecciona un status para habilitar motivos',
+                    helperText: _selectedStatus == 1
+                        ? 'Motivo fijado automaticamente para Exitosa'
+                        : (canEditMotivo ? null : 'Selecciona un status para habilitar motivos'),
                   ),
                   items: motivosPorStatusSeleccionado
                       .map((m) => DropdownMenuItem(

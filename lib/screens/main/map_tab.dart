@@ -15,6 +15,7 @@ import '../../models/order_model.dart';
 import '../../models/backpack_item_model.dart';
 import '../../services/orders_service.dart';
 import '../../config/api_config.dart';
+import '../order/order_detail_screen.dart';
 class MapTab extends StatefulWidget {
   const MapTab({super.key});
 
@@ -545,6 +546,12 @@ class _MapTabState extends State<MapTab> {
         infoWindow: InfoWindow(
           title: o.folioOrdenCliente,
           snippet: o.cliente,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: o.id),
+            ),
+          ),
         ),
       );
     })
@@ -654,6 +661,12 @@ class _MapTabState extends State<MapTab> {
         infoWindow: InfoWindow(
           title: '${i.folioOrden} (OV ${i.idOrdenVenta})',
           snippet: detailSnippet,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: i.idOrdenVenta),
+            ),
+          ),
         ),
       );
     }).whereType<Marker>().toSet();
@@ -1002,23 +1015,6 @@ class _MapTabState extends State<MapTab> {
               ),
             ),
           ),
-
-        // Diagnóstico temporal del mapa (puede retirarse cuando esté validado)
-        Positioned(
-          top: 12,
-          left: 12,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              'Ruta:${hasEnRutaBackpack ? 'si' : 'no'} Bp:${enRutaBackpackIds.length} Pend:${pendingBackpackItems.length} Act:${activeBackpackItems.length} Fil:${filteredOutCount} Coord:${pendingWithCoords.length} Miss:${missingCoordsCount} Ok:${_coordResolvedCount} Err:${_coordFailedCount} Pins:${_markers.length}',
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ),
 
         // --- Panel de navegación inferior (estilo Google Maps) ---
         if (isNavigating && !mapNav.loading)

@@ -30,6 +30,14 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
   Position? _currentPosition;
   bool _loadingLocation = false;
   late int _currentBackpackState;
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -156,7 +164,14 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<BackpacksProvider>();
-    final items = _sortedItems(provider.selectedItems);
+    final allItems = _sortedItems(provider.selectedItems);
+    final items = _searchQuery.isEmpty
+        ? allItems
+        : allItems
+            .where((i) => i.folioOrden
+                .toLowerCase()
+                .contains(_searchQuery.toLowerCase()))
+            .toList();
     final canViewOrderInfo = widget.isAdmin || _currentBackpackState != 1;
 
     final allValidated = items.isNotEmpty && items.every((i) => i.isValidated);
@@ -239,6 +254,35 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                     backgroundColor: Colors.grey.shade200,
                     valueColor:
                         const AlwaysStoppedAnimation(Colors.green),
+                  ),
+
+                // Barra de búsqueda por número de orden
+                if (canViewOrderInfo)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (v) => setState(() => _searchQuery = v.trim()),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar por número de orden...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 20),
+                                onPressed: () {
+                                  _searchCtrl.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
 
                 Expanded(

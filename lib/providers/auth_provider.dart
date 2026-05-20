@@ -44,23 +44,21 @@ class AuthProvider extends ChangeNotifier {
           await _service.logout();
           _state = AuthState.unauthenticated;
         } else {
-          try {
-            _equipos = await _service.getEquipos(_user!.idUsuario);
-            _state = AuthState.authenticated;
-          } on ApiException catch (e) {
-            if (e.statusCode == 401 || e.statusCode == 403) {
-              await _service.logout();
+          // Autenticar inmediatamente para no bloquear el splash.
+          _state = AuthState.authenticated;
+          // Cargar equipos en background; ensureEquiposLoaded() los reintentará si fallan.
+          _service.getEquipos(_user!.idUsuario).then((eq) {
+            _equipos = eq;
+            notifyListeners();
+          }).catchError((dynamic e) {
+            if (e is ApiException && (e.statusCode == 401 || e.statusCode == 403)) {
+              _service.logout();
               _user = null;
               _equipos = [];
               _state = AuthState.unauthenticated;
-            } else {
-              _equipos = [];
-              _state = AuthState.authenticated;
+              notifyListeners();
             }
-          } catch (_) {
-            _equipos = [];
-            _state = AuthState.authenticated;
-          }
+          });
         }
       } else {
         _state = AuthState.unauthenticated;

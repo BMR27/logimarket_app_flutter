@@ -1,12 +1,13 @@
 // Configuración de la API — cambia BASE_URL por la URL de Railway cuando despliegues
 
 class ApiConfig {
-  // En desarrollo local:
-  // static const String baseUrl = 'http://10.0.2.2:3000/api'; // Android emulador
-  // static const String baseUrl = 'http://localhost:3000/api'; // iOS simulador
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://logimarket-api-production.up.railway.app/api',
+  );
 
-  // En producción (Railway):
-  static const String baseUrl = 'https://logimarket-api-production.up.railway.app/api';
+  // En desarrollo local:
+  // Usa --dart-define=API_BASE_URL=... para sobreescribir esta base.
 
   // Endpoints
   static const String login = '$baseUrl/auth/login';
@@ -24,6 +25,8 @@ class ApiConfig {
   static String updateOrder(int id) => '$baseUrl/orders/$id';
   static String orderNotes(int id) => '$baseUrl/orders/$id/notes';
   static String orderPriceRequest(int id) => '$baseUrl/orders/$id/price-request';
+  static String orderGeneratePayment(int id) => '$baseUrl/orders/$id/payments/generate';
+  static String orderPaymentStatus(int id) => '$baseUrl/orders/$id/payments/status';
     static String orderStatusHistory(int id) => '$baseUrl/orders/$id/status-history';
   static String products(int idOrden) => '$baseUrl/products/$idOrden';
   static String productsSimple(int idOrden) => '$baseUrl/products/$idOrden/simple';

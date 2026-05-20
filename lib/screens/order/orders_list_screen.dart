@@ -133,7 +133,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
           if (currentIds.isNotEmpty) break;
 
           if (attempt < 2) {
-            await Future.delayed(const Duration(milliseconds: 350));
+            await Future.delayed(const Duration(milliseconds: 80));
           }
         }
 
@@ -213,7 +213,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       children: [
         // Header operativo: búsqueda + resumen + filtros
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -238,9 +238,9 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   }
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               _CommissionBoard(summary: commissionSummary, money: _money),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
@@ -271,7 +271,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Expanded(
@@ -286,7 +286,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -353,7 +353,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
         // Lista
         Expanded(
-            child: (ordersProvider.loading || _bootstrapping)
+            child: (ordersProvider.loading || _bootstrapping) && ordersProvider.orders.isEmpty
               ? _buildShimmer()
               : RefreshIndicator(
                   onRefresh: () => _loadOrdersWithEquipos(auth, ordersProvider),
@@ -730,7 +730,9 @@ class _OrderCard extends StatelessWidget {
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
-        ).then((_) => (context as Element).markNeedsBuild()),
+        ).then((_) {
+          if (context.mounted) (context as Element).markNeedsBuild();
+        }),
       ),
     );
   }
@@ -767,22 +769,22 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         color: color.withOpacity(0.10),
         border: Border.all(color: color.withOpacity(0.35)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(width: 8),
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+                Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color)),
               ],
             ),
           ),
@@ -836,7 +838,7 @@ class _CommissionBoard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0F766E), Color(0xFF115E59)],
@@ -873,7 +875,7 @@ class _CommissionBoard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           // Tasa activa y comisión total
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -882,7 +884,7 @@ class _CommissionBoard extends StatelessWidget {
                 money(summary.totalCommission),
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 26,
+                  fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -913,9 +915,9 @@ class _CommissionBoard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           const Divider(color: Colors.white24, height: 1),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           // 3 métricas: a entregar, recolectado, pendiente
           Row(
             children: [

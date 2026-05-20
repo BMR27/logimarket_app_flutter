@@ -85,7 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const ListTile(
           leading: Icon(Icons.business),
           title: Text('Desarrollado por'),
-          trailing: Text('Quantum Nest', style: TextStyle(color: Colors.grey)),
+          trailing: Text('Logimarket', style: TextStyle(color: Colors.grey)),
         ),
       ],
     );

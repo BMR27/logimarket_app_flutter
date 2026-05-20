@@ -8,6 +8,7 @@ import '../order/orders_list_screen.dart';
 import '../backpacks/backpacks_screen.dart';
 import '../profile/profile_screen.dart';
 import 'map_tab.dart';
+import 'payments_tab.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -132,6 +133,7 @@ class _MainScreenState extends State<MainScreen> {
     final tabs = [
       const MapTab(),
       const OrdersListScreen(),
+      const PaymentsTab(),
       BackpacksScreen(isAdmin: isAdmin),
       const ProfileScreen(),
     ];
@@ -188,6 +190,7 @@ class _MainScreenState extends State<MainScreen> {
       destinations: const [
           NavigationDestination(icon: Icon(Icons.map), label: 'Mapa'),
           NavigationDestination(icon: Icon(Icons.list_alt), label: 'Entregas'),
+          NavigationDestination(icon: Icon(Icons.qr_code_2), label: 'Cobro'),
           NavigationDestination(
               icon: Icon(Icons.backpack), label: 'Mochilas'),
           NavigationDestination(
