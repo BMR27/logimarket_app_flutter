@@ -24,15 +24,52 @@ class LogimarketApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => BackpacksProvider()),
         ChangeNotifierProvider(create: (_) => MapNavigationProvider()),
       ],
-      child: MaterialApp(
-        title: 'Logimarket',
-        theme: AppTheme.theme,
-        debugShowCheckedModeBanner: false,
-        home: const SplashScreen(),
-        routes: {
-          '/login': (context) => const LoginScreen(),
-        },
-      ),
+      child: const _AppLifecycleWrapper(),
+    );
+  }
+}
+
+/// Observa el ciclo de vida para recargar equipos al volver de apps externas (Maps, Waze).
+class _AppLifecycleWrapper extends StatefulWidget {
+  const _AppLifecycleWrapper();
+
+  @override
+  State<_AppLifecycleWrapper> createState() => _AppLifecycleWrapperState();
+}
+
+class _AppLifecycleWrapperState extends State<_AppLifecycleWrapper>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Al volver de una app externa, recargar equipos si están vacíos
+      // sin tocar el estado de autenticación.
+      context.read<AuthProvider>().ensureEquiposLoaded();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Logimarket',
+      theme: AppTheme.theme,
+      debugShowCheckedModeBanner: false,
+      home: const SplashScreen(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+      },
     );
   }
 }

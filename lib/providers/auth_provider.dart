@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/user_model.dart';
 import '../models/equipo_model.dart';
@@ -35,10 +36,37 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Verifica localmente si el JWT está expirado sin hacer llamadas al servidor.
+  bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      String normalized = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      switch (normalized.length % 4) {
+        case 2: normalized += '==';
+        case 3: normalized += '=';
+      }
+      final payload =
+          jsonDecode(utf8.decode(base64Decode(normalized))) as Map<String, dynamic>;
+      final exp = payload['exp'] as int?;
+      if (exp == null) return false;
+      return DateTime.now().millisecondsSinceEpoch ~/ 1000 > exp;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> checkSession() async {
     try {
       final token = await ApiService.getToken();
       if (token != null) {
+        // Verificar expiración localmente antes de cualquier llamada al servidor.
+        if (_isTokenExpired(token)) {
+          await _service.logout();
+          _state = AuthState.unauthenticated;
+          notifyListeners();
+          return;
+        }
         _user = await _service.getSavedUser();
         if (_user == null) {
           await _service.logout();
@@ -46,18 +74,13 @@ class AuthProvider extends ChangeNotifier {
         } else {
           // Autenticar inmediatamente para no bloquear el splash.
           _state = AuthState.authenticated;
-          // Cargar equipos en background; ensureEquiposLoaded() los reintentará si fallan.
+          // Cargar equipos en background; si falla NO cerrar sesión —
+          // ensureEquiposLoaded() los reintentará cuando el usuario haga una acción.
           _service.getEquipos(_user!.idUsuario).then((eq) {
             _equipos = eq;
             notifyListeners();
-          }).catchError((dynamic e) {
-            if (e is ApiException && (e.statusCode == 401 || e.statusCode == 403)) {
-              _service.logout();
-              _user = null;
-              _equipos = [];
-              _state = AuthState.unauthenticated;
-              notifyListeners();
-            }
+          }).catchError((dynamic _) {
+            // Error silencioso: el usuario sigue autenticado aunque equipos esté vacío.
           });
         }
       } else {
