@@ -129,6 +129,8 @@ class BackpacksProvider extends ChangeNotifier {
           return;
         }
         _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
+        // Cache for offline
+        await LocalDatabase().saveBackpackItems(idBackpack, _selectedItems);
         return;
       }
 
@@ -136,6 +138,14 @@ class BackpacksProvider extends ChangeNotifier {
 
       if (deliverItems.isNotEmpty) {
         _selectedItems = deliverItems;
+        // Cache each backpack's items
+        final byBackpack = <int, List<BackpackItemModel>>{};
+        for (final item in deliverItems) {
+          (byBackpack[item.idBackpack] ??= []).add(item);
+        }
+        for (final entry in byBackpack.entries) {
+          await LocalDatabase().saveBackpackItems(entry.key, entry.value);
+        }
         return;
       }
 
@@ -145,6 +155,7 @@ class BackpacksProvider extends ChangeNotifier {
         for (final backpackId in idBackpackIds.toSet()) {
           final items = await _service.getBackpackItemsAdmin(backpackId);
           allItems.addAll(items);
+          await LocalDatabase().saveBackpackItems(backpackId, items);
         }
         final byItemId = <int, BackpackItemModel>{};
         for (final item in allItems) {
@@ -153,11 +164,30 @@ class BackpacksProvider extends ChangeNotifier {
         _selectedItems = byItemId.values.toList();
       } else if (idBackpack != null) {
         _selectedItems = await _service.getBackpackItemsAdmin(idBackpack);
+        await LocalDatabase().saveBackpackItems(idBackpack, _selectedItems);
       } else {
         _selectedItems = deliverItems;
       }
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      if (e.statusCode == 0) {
+        // Red no disponible — cargar ítems desde caché SQLite
+        final backpackIds = idBackpackIds ?? (idBackpack != null ? [idBackpack] : <int>[]);
+        if (backpackIds.isNotEmpty) {
+          final allItems = <BackpackItemModel>[];
+          for (final bid in backpackIds.toSet()) {
+            allItems.addAll(await LocalDatabase().getBackpackItems(bid));
+          }
+          final byItemId = <int, BackpackItemModel>{};
+          for (final item in allItems) {
+            byItemId[item.idBackpackItem] = item;
+          }
+          _selectedItems = byItemId.values.toList();
+        } else {
+          _errorMessage = 'Sin conexión y sin datos guardados para esta mochila.';
+        }
+      } else {
+        _errorMessage = e.message;
+      }
     } finally {
       _loadingItems = false;
       notifyListeners();
