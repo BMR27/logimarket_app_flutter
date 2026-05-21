@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
@@ -89,22 +90,30 @@ class LocationTrackingService {
     int?            idOrden,
     bool            enViaje = false,
   }) async {
+    await _ensureLocationPermission();
+
+    if (_isRunning) {
+      // Ya está corriendo — solo refrescamos credenciales, NO tocamos _enViaje/_idOrden
+      // (éstos son gestionados exclusivamente por updateTrip).
+      await _savePrefs(
+        idMensajero: idMensajero,
+        token:       token,
+        idOrden:     _idOrden,
+        enViaje:     _enViaje,
+      );
+      debugPrint('[LocationTracking] already running — creds refreshed, enViaje=$_enViaje idOrden=$_idOrden');
+      return;
+    }
+
     _enViaje = enViaje;
     _idOrden = idOrden;
 
-    await _ensureLocationPermission();
     await _savePrefs(
       idMensajero: idMensajero,
       token:       token,
       idOrden:     idOrden,
       enViaje:     enViaje,
     );
-
-    if (_isRunning) {
-      // Ya está corriendo — solo actualizamos los prefs (suficiente para el handler).
-      debugPrint('[LocationTracking] updated prefs idOrden=$idOrden enViaje=$enViaje');
-      return;
-    }
 
     await FlutterForegroundTask.startService(
       notificationTitle: 'Logimarket activo',
@@ -114,6 +123,45 @@ class LocationTrackingService {
 
     _isRunning = await FlutterForegroundTask.isRunningService;
     debugPrint('[LocationTracking] started running=$_isRunning enViaje=$enViaje');
+
+    // Ping inmediato para aparecer en Gestión de Ruta sin esperar el primer tick (10s).
+    unawaited(_sendImmediatePing(idMensajero: idMensajero, token: token));
+  }
+
+  /// Envía un ping de ubicación de inmediato en el hilo principal.
+  Future<void> _sendImmediatePing({
+    required int    idMensajero,
+    required String token,
+  }) async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(const Duration(seconds: 8));
+      final prefs   = await SharedPreferences.getInstance();
+      final apiUrl  = prefs.getString(kPrefsApiUrl);
+      final idOrden = prefs.getInt(kPrefsIdOrden);
+      final enViaje = prefs.getBool(kPrefsEnViaje) ?? false;
+      if (apiUrl == null) return;
+      final body = <String, dynamic>{
+        'idMensajero': idMensajero,
+        'latitud':     pos.latitude,
+        'longitud':    pos.longitude,
+        'accuracy':    pos.accuracy,
+        'enViaje':     enViaje,
+        if (idOrden != null) 'idOrden': idOrden,
+      };
+      await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 8));
+      debugPrint('[LocationTracking] immediate ping ok lat=${pos.latitude} lng=${pos.longitude}');
+    } catch (e) {
+      debugPrint('[LocationTracking] immediate ping error: $e');
+    }
   }
 
   /// Actualiza orden activa y estado de viaje sin reiniciar el servicio.
