@@ -134,9 +134,15 @@ class LocationTrackingService {
     required String token,
   }) async {
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 8));
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 8));
+      } catch (_) {
+        pos = await Geolocator.getLastKnownPosition();
+      }
+      if (pos == null) return;
       final prefs   = await SharedPreferences.getInstance();
       final apiUrl  = prefs.getString(kPrefsApiUrl);
       final idOrden = prefs.getInt(kPrefsIdOrden);

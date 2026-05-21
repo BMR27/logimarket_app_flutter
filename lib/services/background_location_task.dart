@@ -36,9 +36,22 @@ class _LocationTaskHandler extends TaskHandler {
     if (idMensajero == null || token == null || apiUrl == null) return;
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 8));
+      // Intentar posición con precisión media (GPS + red) — más rápida que 'high'.
+      // Si falla o tarda demasiado, usar última posición conocida como fallback
+      // para garantizar que el ping siempre se envíe aunque el GPS esté frío.
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 8));
+      } catch (_) {
+        pos = await Geolocator.getLastKnownPosition();
+        debugPrint('[BgTask] GPS timeout — usando última posición conocida');
+      }
+      if (pos == null) {
+        debugPrint('[BgTask] sin posición disponible, ping cancelado');
+        return;
+      }
 
       final body = <String, dynamic>{
         'idMensajero': idMensajero,
