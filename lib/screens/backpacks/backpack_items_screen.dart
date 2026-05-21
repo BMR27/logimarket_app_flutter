@@ -494,84 +494,152 @@ class _ItemTile extends StatelessWidget {
     this.onDelete,
   });
 
+  static Color _statusColor(int status) {
+    switch (status) {
+      case 1:  return Colors.green;
+      case 2:  return Colors.blue;
+      case 5:  return Colors.orange;
+      case 6:  return Colors.deepOrange;
+      case 7:  return Colors.cyan.shade700;
+      default: return Colors.grey.shade400;
+    }
+  }
+
+  static IconData _statusIcon(int status) {
+    switch (status) {
+      case 1:  return Icons.check_circle;
+      case 2:  return Icons.local_shipping_outlined;
+      case 5:  return Icons.warning_amber_rounded;
+      case 6:  return Icons.warning_rounded;
+      case 7:  return Icons.delivery_dining;
+      default: return Icons.radio_button_unchecked;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final deliveryColor = _statusColor(item.idStatusOrden);
+    final isDelivered  = item.idStatusOrden == 1;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      color: item.isValidated 
-          ? Colors.green.shade50 
-          : Colors.white,
-      child: ListTile(
-        tileColor: item.isValidated 
-            ? Colors.green.shade50 
-            : null,
-        leading: CircleAvatar(
-          backgroundColor:
-              item.isValidated ? Colors.green.shade100 : Colors.grey.shade100,
-          child: Icon(
-            item.isValidated ? Icons.check_circle : Icons.radio_button_unchecked,
-            color: item.isValidated ? Colors.green : Colors.grey,
-            size: 24,
-          ),
-        ),
-        title: Text(
-          item.folioOrden,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: item.isValidated ? Colors.green.shade700 : Colors.black,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+      clipBehavior: Clip.antiAlias,
+      color: isDelivered ? Colors.green.shade50 : Colors.white,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              item.nombreCliente,
-              style: TextStyle(
-                color: item.isValidated ? Colors.green.shade600 : Colors.grey.shade700,
+            // Barra lateral de color según status de entrega
+            Container(width: 5, color: deliveryColor),
+            Expanded(
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: item.isValidated
+                      ? Colors.green.shade100
+                      : Colors.grey.shade100,
+                  child: Icon(
+                    item.isValidated
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: item.isValidated ? Colors.green : Colors.grey,
+                    size: 24,
+                  ),
+                ),
+                title: Text(
+                  item.folioOrden,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isDelivered ? Colors.green.shade700 : Colors.black,
+                  ),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.nombreCliente,
+                      style: TextStyle(
+                        color: isDelivered
+                            ? Colors.green.shade600
+                            : Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    // Chip de status de entrega
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: deliveryColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: deliveryColor.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_statusIcon(item.idStatusOrden),
+                              size: 12, color: deliveryColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            item.statusName,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: deliveryColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (distance != null) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(Icons.near_me,
+                              size: 12, color: Color(0xFF1A73E8)),
+                          const SizedBox(width: 3),
+                          Text(
+                            distance!,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF1A73E8),
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+                trailing: isAdmin
+                    ? IconButton(
+                        icon: const Icon(Icons.delete_outline,
+                            color: Colors.red),
+                        onPressed: onDelete,
+                      )
+                    : Icon(
+                        Icons.chevron_right,
+                        color: isDelivered ? Colors.green : Colors.grey,
+                      ),
+                onTap: () {
+                  final auth = context.read<AuthProvider>();
+                  unawaited(
+                    context
+                        .read<OrdersProvider>()
+                        .preloadOrder(item.idOrdenVenta, auth.equiposForQuery),
+                  );
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          OrderDetailScreen(orderId: item.idOrdenVenta),
+                    ),
+                  );
+                },
               ),
             ),
-            if (distance != null)
-              Row(
-                children: [
-                  const Icon(Icons.near_me,
-                      size: 12, color: Color(0xFF1A73E8)),
-                  const SizedBox(width: 3),
-                  Text(
-                    distance!,
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF1A73E8),
-                        fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
           ],
         ),
-        trailing: isAdmin
-            ? IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: onDelete,
-              )
-            : Icon(
-                Icons.chevron_right, 
-                color: item.isValidated ? Colors.green : Colors.grey,
-              ),
-        onTap: () {
-          final auth = context.read<AuthProvider>();
-          unawaited(
-            context
-                .read<OrdersProvider>()
-                .preloadOrder(item.idOrdenVenta, auth.equiposForQuery),
-          );
-
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => OrderDetailScreen(orderId: item.idOrdenVenta),
-            ),
-          );
-        },
       ),
     );
   }
