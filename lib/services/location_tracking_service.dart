@@ -115,6 +115,12 @@ class LocationTrackingService {
       enViaje:     enViaje,
     );
 
+    // Solicitar exención de optimización de batería para que Android
+    // no mate el foreground service (crítico en Samsung, Xiaomi, Huawei, etc.)
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    }
+
     await FlutterForegroundTask.startService(
       notificationTitle: 'Logimarket activo',
       notificationText:  'Rastreando tu ubicación...',
