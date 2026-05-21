@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/backpacks_provider.dart';
 import '../../providers/map_navigation_provider.dart';
+import '../../services/connectivity_service.dart';
 import '../order/orders_list_screen.dart';
 import '../backpacks/backpacks_screen.dart';
 import '../profile/profile_screen.dart';
@@ -20,6 +22,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   int _prevIndex = 0;
+  StreamSubscription<void>? _connectivitySub;
 
   bool _isAdminOrLeader(AuthProvider auth) {
     final type = auth.user?.type.toLowerCase() ?? '';
@@ -31,10 +34,30 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
+    ConnectivityService.instance.startMonitoring();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInitialData();
       context.read<MapNavigationProvider>().addListener(_onMapNavChanged);
+      _connectivitySub = ConnectivityService.instance.onConnectionRestored.listen((_) {
+        _onConnectionRestored();
+      });
     });
+  }
+
+  Future<void> _onConnectionRestored() async {
+    if (!mounted) return;
+    final ordersProvider = context.read<OrdersProvider>();
+    final synced = await ordersProvider.syncAllOffline();
+    await _reloadOrders();
+    if (synced > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Conexión restaurada — $synced elemento(s) sincronizado(s)'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _onMapNavChanged() {
@@ -46,6 +69,8 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _connectivitySub?.cancel();
+    ConnectivityService.instance.stopMonitoring();
     context.read<MapNavigationProvider>().removeListener(_onMapNavChanged);
     super.dispose();
   }
@@ -145,9 +170,12 @@ class _MainScreenState extends State<MainScreen> {
           // Indicador de modo offline
           Consumer<OrdersProvider>(
             builder: (_, ordProv, __) => ordProv.offline
-                ? const Padding(
-                    padding: EdgeInsets.only(right: 8),
-                    child: Icon(Icons.cloud_off, color: Colors.orange),
+                ? const Tooltip(
+                    message: 'Sin conexión — cambios guardados localmente',
+                    child: Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Icon(Icons.cloud_off, color: Colors.orange),
+                    ),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -155,10 +183,10 @@ class _MainScreenState extends State<MainScreen> {
             onSelected: (value) async {
               if (value == 'sync') {
                 final count =
-                    await context.read<OrdersProvider>().syncOfflineOrders();
+                    await context.read<OrdersProvider>().syncAllOffline();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('$count pedidos sincronizados')),
+                    SnackBar(content: Text('$count elemento(s) sincronizado(s)')),
                   );
                 }
               } else if (value == 'logout') {

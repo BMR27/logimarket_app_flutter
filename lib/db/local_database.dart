@@ -16,7 +16,7 @@ class LocalDatabase {
     final path = join(await getDatabasesPath(), 'logimarket_offline.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE ordenes (
@@ -76,6 +76,33 @@ class LocalDatabase {
             explicacion TEXT
           )
         ''');
+
+        await db.execute('''
+          CREATE TABLE pending_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            idOrden INTEGER NOT NULL,
+            idUsuario INTEGER NOT NULL,
+            nombreReceptor TEXT,
+            fotoBase64 TEXT,
+            firmaBase64 TEXT,
+            createdAt TEXT NOT NULL
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS pending_evidence (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idOrden INTEGER NOT NULL,
+              idUsuario INTEGER NOT NULL,
+              nombreReceptor TEXT,
+              fotoBase64 TEXT,
+              firmaBase64 TEXT,
+              createdAt TEXT NOT NULL
+            )
+          ''');
+        }
       },
     );
   }
@@ -164,5 +191,35 @@ class LocalDatabase {
   Future<List<Map<String, dynamic>>> getAllOrders() async {
     final database = await db;
     return database.query('ordenes', where: 'idStatus IN (2, 5, 6)');
+  }
+
+  // ─── Evidencias pendientes (offline) ────────────────────────────────────────
+
+  Future<void> savePendingEvidence({
+    required int idOrden,
+    required int idUsuario,
+    String? nombreReceptor,
+    String? fotoBase64,
+    String? firmaBase64,
+  }) async {
+    final database = await db;
+    await database.insert('pending_evidence', {
+      'idOrden': idOrden,
+      'idUsuario': idUsuario,
+      'nombreReceptor': nombreReceptor,
+      'fotoBase64': fotoBase64,
+      'firmaBase64': firmaBase64,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getPendingEvidence() async {
+    final database = await db;
+    return database.query('pending_evidence', orderBy: 'createdAt ASC');
+  }
+
+  Future<void> deletePendingEvidence(int id) async {
+    final database = await db;
+    await database.delete('pending_evidence', where: 'id = ?', whereArgs: [id]);
   }
 }

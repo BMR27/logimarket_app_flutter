@@ -3,6 +3,7 @@ import '../models/order_model.dart';
 import '../models/product_model.dart';
 import '../services/orders_service.dart';
 import '../services/api_service.dart';
+import '../config/api_config.dart';
 import '../db/local_database.dart';
 
 class OrdersProvider extends ChangeNotifier {
@@ -281,5 +282,37 @@ class OrdersProvider extends ChangeNotifier {
     }
     if (synced > 0) await _localDb.clearEditedOrders();
     return synced;
+  }
+
+  /// Sube las evidencias que fueron guardadas offline (foto/firma).
+  Future<int> syncPendingEvidence() async {
+    final pending = await _localDb.getPendingEvidence();
+    int synced = 0;
+    final svc = ApiService();
+    for (final row in pending) {
+      try {
+        await svc.post(ApiConfig.orderEvidencia(row['idOrden'] as int), {
+          'idUsuario': row['idUsuario'],
+          if (row['nombreReceptor'] != null) 'nombreReceptor': row['nombreReceptor'],
+          if (row['fotoBase64'] != null) 'fotoBase64': row['fotoBase64'],
+          if (row['firmaBase64'] != null) 'firmaBase64': row['firmaBase64'],
+        });
+        await _localDb.deletePendingEvidence(row['id'] as int);
+        synced++;
+      } on ApiException catch (e) {
+        if (e.statusCode == 0) break; // sigue sin conexión, detener
+      } catch (_) {
+        // Continuar con el siguiente
+      }
+    }
+    return synced;
+  }
+
+  /// Sincroniza todo lo pendiente (órdenes + evidencias).
+  /// Retorna el total de ítems sincronizados.
+  Future<int> syncAllOffline() async {
+    final orders = await syncOfflineOrders();
+    final evidence = await syncPendingEvidence();
+    return orders + evidence;
   }
 }

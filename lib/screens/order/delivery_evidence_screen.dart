@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:signature/signature.dart';
 import '../../config/api_config.dart';
+import '../../db/local_database.dart';
 import '../../services/api_service.dart';
 import 'camera_capture_screen.dart';
 
@@ -194,6 +195,33 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
           ),
         );
         Navigator.pop(context, true);
+      }
+    } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        // Sin conexión — guardar localmente y subir cuando regrese internet
+        await LocalDatabase().savePendingEvidence(
+          idOrden: widget.orderId,
+          idUsuario: widget.idUsuario,
+          nombreReceptor: nombre,
+          fotoBase64: _fotoBase64 != null ? _normalizeBase64(_fotoBase64!) : null,
+          firmaBase64: firmaBase64,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión — evidencia guardada. Se subirá al recuperar internet.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+          Navigator.pop(context, true);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al guardar: ${e.message}')),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
