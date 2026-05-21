@@ -31,8 +31,17 @@ class BackpacksProvider extends ChangeNotifier {
       final fetched = await _service.getBackpacks(idUsuario);
       // Salvaguarda cliente: una mochila cerrada/cancelada (state=4) no debe mostrarse al mensajero.
       _backpacks = fetched.where((b) => b.state != 4).toList();
+      // Persist for offline access
+      await LocalDatabase().saveBackpacks(idUsuario, _backpacks);
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      if (e.statusCode == 0) {
+        // Red no disponible — cargar desde caché local
+        final cached = await LocalDatabase().getCachedBackpacks(idUsuario);
+        _backpacks = cached.where((b) => b.state != 4).toList();
+        _errorMessage = cached.isEmpty ? null : 'Sin conexión — mochilas en caché.';
+      } else {
+        _errorMessage = e.message;
+      }
     }
     _loadingBackpacks = false;
     notifyListeners();

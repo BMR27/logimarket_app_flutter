@@ -42,8 +42,16 @@ class OrdersProvider extends ChangeNotifier {
 
     final uniqueIds = orderIds.toSet().where((id) => id > 0).toList()..sort();
     if (uniqueIds.isEmpty) {
-      _orders = [];
-      _offline = false;
+      // Puede ser que los backpacks también fallaron offline — intentar caché local
+      final cached = await _localDb.getAllOrders();
+      if (cached.isNotEmpty) {
+        _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
+        _offline = true;
+        _errorMessage = 'Sin conexión — mostrando datos guardados localmente.';
+      } else {
+        _orders = [];
+        _offline = false;
+      }
       _loading = false;
       notifyListeners();
       return;

@@ -566,33 +566,36 @@ class _ItemTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     // Chip de status de entrega
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: deliveryColor.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: deliveryColor.withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(_statusIcon(item.idStatusOrden),
-                              size: 12, color: deliveryColor),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              item.statusName,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: deliveryColor,
-                                fontWeight: FontWeight.w600,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 200),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: deliveryColor.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: deliveryColor.withOpacity(0.4)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_statusIcon(item.idStatusOrden),
+                                size: 12, color: deliveryColor),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                item.statusName,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: deliveryColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                     if (distance != null) ...[

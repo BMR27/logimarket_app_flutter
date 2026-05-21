@@ -78,4 +78,15 @@ class BackpackModel {
         totalOrders: _toInt(json['TotalOrders'] ?? json['totalOrders']),
         progressOrders: _toInt(json['ProgressOrders'] ?? json['progressOrders']),
       );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'idRepartidor': idRepartidor,
+    'nombreRepartidor': nombreRepartidor,
+    'creationDate': creationDate,
+    'state': state,
+    'stateName': stateName,
+    'totalOrders': totalOrders,
+    'progressOrders': progressOrders,
+  };
 }
