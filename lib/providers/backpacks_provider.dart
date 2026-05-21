@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../db/local_database.dart';
 import '../models/backpack_model.dart';
 import '../models/backpack_item_model.dart';
 import '../services/backpacks_service.dart';
@@ -54,8 +55,23 @@ class BackpacksProvider extends ChangeNotifier {
       _selectedBackpackId = idBackpack;
       _selectedItems = fetched;
       _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(fetched);
+      // Persist to SQLite for offline access
+      await LocalDatabase().saveBackpackItems(idBackpack, fetched);
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      if (e.statusCode == 0) {
+        // Red no disponible — cargar desde caché local
+        final sqlCached = await LocalDatabase().getBackpackItems(idBackpack);
+        if (sqlCached.isNotEmpty) {
+          _selectedBackpackId = idBackpack;
+          _selectedItems = sqlCached;
+          _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(sqlCached);
+          _errorMessage = 'Sin conexión — mostrando datos guardados.';
+        } else {
+          _errorMessage = 'Sin conexión y sin datos guardados para esta mochila.';
+        }
+      } else {
+        _errorMessage = e.message;
+      }
     }
     _loadingItems = false;
     notifyListeners();

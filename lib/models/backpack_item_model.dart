@@ -78,4 +78,23 @@ class BackpackItemModel {
         estado: json['Estado']?.toString() ?? json['estado']?.toString(),
         codigoPostal: json['CodigoPostal']?.toString() ?? json['codigoPostal']?.toString(),
       );
+
+  Map<String, dynamic> toJson() => {
+    'idBackpack': idBackpack,
+    'idBackpackItem': idBackpackItem,
+    'idOrdenVenta': idOrdenVenta,
+    'folioOrden': folioOrden,
+    'idStatusOrden': idStatusOrden,
+    'statusName': statusName,
+    'nombreCliente': nombreCliente,
+    'validation': validation,
+    'latitud': latitud,
+    'longitud': longitud,
+    'calle': calle,
+    'numExterior': numExterior,
+    'colonia': colonia,
+    'municipio': municipio,
+    'estado': estado,
+    'codigoPostal': codigoPostal,
+  };
 }

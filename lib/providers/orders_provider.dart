@@ -83,18 +83,26 @@ class OrdersProvider extends ChangeNotifier {
         debugPrint('[ORDERS] load-by-ids ok count=${_orders.length}');
       }
     } else {
-      _orders = [];
-      _offline = hadNetworkError;
-      if (hadAuthError) {
-        _errorMessage = 'Sesion expirada. Inicia sesion nuevamente.';
-      } else if (hadNetworkError) {
-        _errorMessage = 'Sin conexion - no se pudieron cargar entregas activas.';
+      // Sin resultados: intentar DB local si fue error de red
+      if (hadNetworkError) {
+        final cached = await _localDb.getAllOrders();
+        _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
+        _offline = true;
+        _errorMessage = cached.isEmpty
+            ? 'Sin conexión y sin datos guardados localmente.'
+            : 'Sin conexión — mostrando datos guardados localmente.';
       } else {
-        _errorMessage = 'No se pudieron cargar las entregas activas.';
+        _orders = [];
+        _offline = false;
+        if (hadAuthError) {
+          _errorMessage = 'Sesion expirada. Inicia sesion nuevamente.';
+        } else {
+          _errorMessage = 'No se pudieron cargar las entregas activas.';
+        }
       }
       if (kDebugMode) {
         debugPrint(
-          '[ORDERS] load-by-ids empty ids=${uniqueIds.length} network=$hadNetworkError auth=$hadAuthError',
+          '[ORDERS] load-by-ids fallback network=$hadNetworkError auth=$hadAuthError cached=${_orders.length}',
         );
       }
     }

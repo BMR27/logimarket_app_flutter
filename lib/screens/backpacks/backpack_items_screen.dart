@@ -581,12 +581,15 @@ class _ItemTile extends StatelessWidget {
                           Icon(_statusIcon(item.idStatusOrden),
                               size: 12, color: deliveryColor),
                           const SizedBox(width: 4),
-                          Text(
-                            item.statusName,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: deliveryColor,
-                              fontWeight: FontWeight.w600,
+                          Flexible(
+                            child: Text(
+                              item.statusName,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: deliveryColor,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],

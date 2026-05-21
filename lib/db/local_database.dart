@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import '../models/backpack_item_model.dart';
 import '../models/order_model.dart';
 
 /// Base de datos local SQLite para el modo offline.
@@ -16,7 +18,7 @@ class LocalDatabase {
     final path = join(await getDatabasesPath(), 'logimarket_offline.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE ordenes (
@@ -88,6 +90,15 @@ class LocalDatabase {
             createdAt TEXT NOT NULL
           )
         ''');
+
+        await db.execute('''
+          CREATE TABLE backpack_items_cache (
+            idBackpack INTEGER NOT NULL,
+            idBackpackItem INTEGER NOT NULL,
+            json TEXT NOT NULL,
+            PRIMARY KEY (idBackpack, idBackpackItem)
+          )
+        ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -100,6 +111,16 @@ class LocalDatabase {
               fotoBase64 TEXT,
               firmaBase64 TEXT,
               createdAt TEXT NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 3) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS backpack_items_cache (
+              idBackpack INTEGER NOT NULL,
+              idBackpackItem INTEGER NOT NULL,
+              json TEXT NOT NULL,
+              PRIMARY KEY (idBackpack, idBackpackItem)
             )
           ''');
         }
@@ -190,7 +211,41 @@ class LocalDatabase {
 
   Future<List<Map<String, dynamic>>> getAllOrders() async {
     final database = await db;
-    return database.query('ordenes', where: 'idStatus IN (2, 5, 6)');
+    // Incluye todos los status activos: En Ruta(2), Intento1(5), Intento2(6), On Delivery(7)
+    return database.query('ordenes', where: 'idStatus IN (2, 5, 6, 7)');
+  }
+
+  // ─── Caché de ítems de mochila ────────────────────────────────────────────
+
+  Future<void> saveBackpackItems(
+      int idBackpack, List<BackpackItemModel> items) async {
+    final database = await db;
+    final batch = database.batch();
+    batch.delete('backpack_items_cache',
+        where: 'idBackpack = ?', whereArgs: [idBackpack]);
+    for (final item in items) {
+      batch.insert(
+        'backpack_items_cache',
+        {
+          'idBackpack': idBackpack,
+          'idBackpackItem': item.idBackpackItem,
+          'json': jsonEncode(item.toJson()),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<BackpackItemModel>> getBackpackItems(int idBackpack) async {
+    final database = await db;
+    final rows = await database.query('backpack_items_cache',
+        where: 'idBackpack = ?', whereArgs: [idBackpack]);
+    return rows
+        .map((r) =>
+            BackpackItemModel.fromJson(
+                Map<String, dynamic>.from(jsonDecode(r['json'] as String) as Map)))
+        .toList();
   }
 
   // ─── Evidencias pendientes (offline) ────────────────────────────────────────
