@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
@@ -10,6 +11,7 @@ import '../../models/catalogs_model.dart';
 import '../../models/order_model.dart';
 import '../../services/catalogs_service.dart';
 import '../../services/api_service.dart';
+import '../../services/background_location_task.dart';
 import '../../services/orders_service.dart';
 import '../../services/location_tracking_service.dart';
 import 'delivery_evidence_screen.dart';
@@ -531,15 +533,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // Sincronizar estado de viaje con el tracker global
+    // Sincronizar estado de viaje con el tracker global (ruta rápida en memoria).
     _enViaje = LocationTrackingService.instance.isTracking &&
         LocationTrackingService.instance.enViaje &&
         LocationTrackingService.instance.activeOrderId == widget.orderId;
+    // Fallback asíncrono: si el singleton no refleja el viaje activo
+    // (por reinicio del proceso o race condition en start()), leer SharedPreferences.
+    if (!_enViaje) {
+      _restoreEnViajeFromPrefs();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<MapNavigationProvider>().clearRoute();
       _loadData();
     });
+  }
+
+  /// Lee SharedPreferences para restaurar el estado de viaje cuando el singleton
+  /// no lo tiene (reinicio del proceso, race condition, etc.).
+  Future<void> _restoreEnViajeFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEnViaje = prefs.getBool(kPrefsEnViaje) ?? false;
+    final savedIdOrden = prefs.getInt(kPrefsIdOrden);
+    if (savedEnViaje && savedIdOrden == widget.orderId && mounted) {
+      setState(() => _enViaje = true);
+    }
   }
 
   @override

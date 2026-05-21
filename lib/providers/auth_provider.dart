@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import '../models/equipo_model.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/background_location_task.dart';
 import '../services/location_tracking_service.dart';
 
 enum AuthState { unknown, authenticated, unauthenticated }
@@ -48,18 +50,27 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Arranca el tracking de ubicación en background si el usuario es mensajero.
+  /// Restaura el estado de viaje guardado en SharedPreferences para sobrevivir
+  /// reinicios del proceso (kill de Android, cambio de app, etc.).
   /// No lanza excepción — falla silenciosa para no bloquear el flujo de auth.
   Future<void> _autoStartTracking(UserModel user) async {
     if (!_isMensajero(user)) return;
     try {
       final token = await ApiService.getToken();
       if (token == null) return;
+      // Recuperar estado de viaje previo desde SharedPreferences.
+      // Si el proceso fue reiniciado mientras el viaje estaba activo,
+      // esto garantiza que start() recibe enViaje=true en lugar de false.
+      final prefs = await SharedPreferences.getInstance();
+      final savedEnViaje = prefs.getBool(kPrefsEnViaje) ?? false;
+      final savedIdOrden = prefs.getInt(kPrefsIdOrden);
       await LocationTrackingService.instance.start(
         idMensajero: user.idUsuario,
         token: token,
-        enViaje: false,
+        idOrden: savedIdOrden,
+        enViaje: savedEnViaje,
       );
-      debugPrint('[Auth] auto-tracking started for mensajero ${user.idUsuario}');
+      debugPrint('[Auth] auto-tracking started for mensajero ${user.idUsuario} enViaje=$savedEnViaje');
     } catch (e) {
       debugPrint('[Auth] auto-tracking start error: $e');
     }
