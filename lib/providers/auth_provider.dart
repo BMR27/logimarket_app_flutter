@@ -64,10 +64,12 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final savedEnViaje = prefs.getBool(kPrefsEnViaje) ?? false;
       final savedIdOrden = prefs.getInt(kPrefsIdOrden);
+      final savedFolioOrden = prefs.getString(kPrefsFolioOrden);
       await LocationTrackingService.instance.start(
         idMensajero: user.idUsuario,
         token: token,
         idOrden: savedIdOrden,
+        folioOrden: savedFolioOrden,
         enViaje: savedEnViaje,
       );
       debugPrint('[Auth] auto-tracking started for mensajero ${user.idUsuario} enViaje=$savedEnViaje');
@@ -121,7 +123,15 @@ class AuthProvider extends ChangeNotifier {
           _service.getEquipos(_user!.idUsuario).then((eq) {
             _equipos = eq;
             notifyListeners();
-          }).catchError((dynamic _) {
+          }).catchError((dynamic e) async {
+            if (e is ApiException && e.statusCode == 401) {
+              await _service.logout();
+              _user = null;
+              _equipos = [];
+              _state = AuthState.unauthenticated;
+              notifyListeners();
+              return;
+            }
             // Error silencioso: el usuario sigue autenticado aunque equipos esté vacío.
           });
         }

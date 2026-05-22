@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 const String kPrefsMensajero  = 'bg_tracking_idMensajero';
 const String kPrefsToken      = 'bg_tracking_token';
 const String kPrefsIdOrden    = 'bg_tracking_idOrden';
+const String kPrefsFolioOrden = 'bg_tracking_folioOrden';
 const String kPrefsEnViaje    = 'bg_tracking_enViaje';
 const String kPrefsApiUrl     = 'bg_tracking_apiUrl';
 

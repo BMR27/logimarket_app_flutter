@@ -475,9 +475,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _toggleViaje(AuthProvider auth) async {
     final tracker = LocationTrackingService.instance;
+    final selectedOrder = context.read<OrdersProvider>().selectedOrder;
+    final currentFolio = selectedOrder?.folioOrdenCliente.trim();
+
     if (_enViaje) {
       // Detener viaje
-      await tracker.updateTrip(idOrden: widget.orderId, enViaje: false);
+      await tracker.updateTrip(enViaje: false);
       setState(() => _enViaje = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Viaje finalizado'), backgroundColor: Colors.orange),
@@ -488,10 +491,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           tracker.activeOrderId != null &&
           tracker.activeOrderId != widget.orderId;
       if (hasAnotherActiveTrip) {
+        final activeRef = (tracker.activeOrderFolio ?? '').trim().isNotEmpty
+            ? 'folio ${tracker.activeOrderFolio}'
+            : 'orden ${tracker.activeOrderId}';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Ya hay un viaje activo en la orden ${tracker.activeOrderId}. Finalizalo antes de iniciar otro.',
+              'Ya hay un viaje activo en el $activeRef. Finalizalo antes de iniciar otro.',
             ),
             backgroundColor: Colors.orange,
           ),
@@ -511,10 +517,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             idMensajero: auth.user!.idUsuario,
             token: token,
             idOrden: widget.orderId,
+            folioOrden: currentFolio,
             enViaje: true,
           );
         } else {
-          await tracker.updateTrip(idOrden: widget.orderId, enViaje: true);
+          await tracker.updateTrip(
+            idOrden: widget.orderId,
+            folioOrden: currentFolio,
+            enViaje: true,
+          );
         }
 
         setState(() => _enViaje = true);

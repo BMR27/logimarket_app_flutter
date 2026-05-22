@@ -18,10 +18,12 @@ class LocationTrackingService {
   bool _isRunning = false;
   bool _enViaje   = false;
   int? _idOrden;
+  String? _folioOrden;
 
   bool get isTracking => _isRunning;
   bool get enViaje    => _enViaje;
   int? get activeOrderId => _idOrden;
+  String? get activeOrderFolio => _folioOrden;
 
   static const int intervalSeconds = 10;
 
@@ -69,6 +71,7 @@ class LocationTrackingService {
     required int idMensajero,
     required String token,
     int?    idOrden,
+    String? folioOrden,
     required bool enViaje,
   }) async {
     final prefs = await SharedPreferences.getInstance();
@@ -81,6 +84,11 @@ class LocationTrackingService {
     } else {
       await prefs.remove(kPrefsIdOrden);
     }
+    if (folioOrden != null && folioOrden.trim().isNotEmpty) {
+      await prefs.setString(kPrefsFolioOrden, folioOrden.trim());
+    } else {
+      await prefs.remove(kPrefsFolioOrden);
+    }
   }
 
   /// Inicia el tracking con foreground service.
@@ -88,6 +96,7 @@ class LocationTrackingService {
     required int    idMensajero,
     required String token,
     int?            idOrden,
+    String?         folioOrden,
     bool            enViaje = false,
   }) async {
     await _ensureLocationPermission();
@@ -99,6 +108,7 @@ class LocationTrackingService {
         idMensajero: idMensajero,
         token:       token,
         idOrden:     _idOrden,
+        folioOrden:  _folioOrden,
         enViaje:     _enViaje,
       );
       debugPrint('[LocationTracking] already running — creds refreshed, enViaje=$_enViaje idOrden=$_idOrden');
@@ -107,11 +117,15 @@ class LocationTrackingService {
 
     _enViaje = enViaje;
     _idOrden = idOrden;
+    _folioOrden = (folioOrden != null && folioOrden.trim().isNotEmpty)
+        ? folioOrden.trim()
+        : null;
 
     await _savePrefs(
       idMensajero: idMensajero,
       token:       token,
       idOrden:     idOrden,
+      folioOrden:  _folioOrden,
       enViaje:     enViaje,
     );
 
@@ -177,17 +191,31 @@ class LocationTrackingService {
   }
 
   /// Actualiza orden activa y estado de viaje sin reiniciar el servicio.
-  Future<void> updateTrip({int? idOrden, required bool enViaje}) async {
-    _idOrden = idOrden;
+  Future<void> updateTrip({int? idOrden, String? folioOrden, required bool enViaje}) async {
     _enViaje = enViaje;
+    if (enViaje) {
+      _idOrden = idOrden;
+      if (folioOrden != null && folioOrden.trim().isNotEmpty) {
+        _folioOrden = folioOrden.trim();
+      }
+    } else {
+      _idOrden = null;
+      _folioOrden = null;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kPrefsEnViaje, enViaje);
-    if (idOrden != null) {
-      await prefs.setInt(kPrefsIdOrden, idOrden);
+    if (_idOrden != null) {
+      await prefs.setInt(kPrefsIdOrden, _idOrden!);
     } else {
       await prefs.remove(kPrefsIdOrden);
     }
-    debugPrint('[LocationTracking] trip updated idOrden=$idOrden enViaje=$enViaje');
+    if (_folioOrden != null && _folioOrden!.isNotEmpty) {
+      await prefs.setString(kPrefsFolioOrden, _folioOrden!);
+    } else {
+      await prefs.remove(kPrefsFolioOrden);
+    }
+    debugPrint('[LocationTracking] trip updated idOrden=$_idOrden folio=$_folioOrden enViaje=$enViaje');
   }
 
   /// Detiene el foreground service y borra la ubicación del backend.
@@ -206,6 +234,7 @@ class LocationTrackingService {
     await prefs.remove(kPrefsMensajero);
     await prefs.remove(kPrefsToken);
     await prefs.remove(kPrefsIdOrden);
+    await prefs.remove(kPrefsFolioOrden);
     await prefs.remove(kPrefsEnViaje);
     await prefs.remove(kPrefsApiUrl);
 
