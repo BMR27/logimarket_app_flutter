@@ -18,6 +18,89 @@ class BackpacksScreen extends StatefulWidget {
 }
 
 class _BackpacksScreenState extends State<BackpacksScreen> {
+  Widget _buildErrorState(String message, VoidCallback onRetry) {
+    final isSessionMessage = message.toLowerCase().contains('sesión');
+    final title = isSessionMessage ? 'Sesión finalizada' : 'Ocurrió un problema';
+
+    return ListView(
+      children: [
+        const SizedBox(height: 56),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.red.shade100),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x1A000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.error_outline_rounded,
+                    size: 34,
+                    color: Colors.red.shade400,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    height: 1.35,
+                    color: Color(0xFF4B5563),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                    label: const Text('Reintentar'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(46),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<BackpacksProvider>();
@@ -29,28 +112,9 @@ class _BackpacksScreenState extends State<BackpacksScreen> {
         child: provider.loadingBackpacks
             ? _buildShimmer()
             : provider.errorMessage != null
-                ? ListView(
-                    children: [
-                      const SizedBox(height: 60),
-                      Center(
-                        child: Column(
-                          children: [
-                            const Icon(Icons.error_outline,
-                                size: 48, color: Colors.red),
-                            const SizedBox(height: 12),
-                            Text(provider.errorMessage!,
-                                textAlign: TextAlign.center),
-                            const SizedBox(height: 16),
-                            TextButton.icon(
-                              onPressed: () =>
-                                  provider.loadBackpacks(auth.user!.idUsuario),
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Reintentar'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                ? _buildErrorState(
+                    provider.errorMessage!,
+                    () => provider.loadBackpacks(auth.user!.idUsuario),
                   )
                 : provider.backpacks.isEmpty
                     ? ListView(
