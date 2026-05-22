@@ -144,13 +144,13 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> login(String correo, String password) async {
+  Future<bool> login(String correo, String password, {bool forceLogin = false}) async {
     _loading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      _user = await _service.login(correo, password);
+      _user = await _service.login(correo, password, forceLogin: forceLogin);
       _equipos = await _service.getEquipos(_user!.idUsuario);
       _state = AuthState.authenticated;
       _loading = false;

@@ -11,6 +11,7 @@ class ApiConfig {
 
   // Endpoints
   static const String login = '$baseUrl/auth/login';
+  static const String logout = '$baseUrl/auth/logout';
   static const String version = '$baseUrl/auth/version';
   static String equipos(int idUsuario) => '$baseUrl/equipos/$idUsuario';
   static String orders({String equipos = '', String folio = ''}) =>

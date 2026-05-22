@@ -11,6 +11,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const String _activeSessionMessage =
+      'Ya existe una sesión activa para este usuario. ¿Deseas cerrar la anterior y activar esta?';
+
   final _formKey = GlobalKey<FormState>();
   final _correoCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
@@ -34,6 +37,42 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
+
+    if (!ok && mounted && auth.errorMessage == _activeSessionMessage) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Sesión activa detectada'),
+          content: const Text(_activeSessionMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Sí, continuar'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm == true && mounted) {
+        final forcedOk = await auth.login(
+          _correoCtrl.text.trim(),
+          _passCtrl.text.trim(),
+          forceLogin: true,
+        );
+
+        if (forcedOk && mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const AppRouter()),
+          );
+          return;
+        }
+      }
+    }
+
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
