@@ -375,23 +375,22 @@ class _ActionButtonsState extends State<_ActionButtons> {
   bool _loading = false;
 
   Future<void> _changeState(int newState) async {
-    if (newState == 3 && !widget.allValidated) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Debes validar todas las entregas antes de finalizar la mochila'),
-        ),
-      );
-      return;
-    }
-
     final label = newState == 2 ? 'aceptar' : 'finalizar';
+    final pendientes = newState == 3
+        ? widget.provider.selectedItems.where((i) => !i.isValidated).length
+        : 0;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(newState == 2 ? 'Aceptar mochila' : 'Finalizar mochila'),
-        content: Text(newState == 2
-            ? '¿Confirmas que aceptas esta mochila y empiezas la ruta?'
-            : '¿Confirmas que todas las entregas han sido realizadas?'),
+        content: newState == 3 && pendientes > 0
+            ? Text(
+                '¿Confirmas que finalizas la mochila?\n\n'
+                'Atención: $pendientes orden(es) no han sido validada(s).',
+              )
+            : Text(newState == 2
+                ? '¿Confirmas que aceptas esta mochila y empiezas la ruta?'
+                : '¿Confirmas que todas las entregas han sido realizadas?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -472,7 +471,7 @@ class _ActionButtonsState extends State<_ActionButtons> {
               minimumSize: const Size.fromHeight(48),
               backgroundColor: widget.allValidated ? Colors.green : Colors.orange,
             ),
-            onPressed: widget.allValidated ? () => _changeState(3) : null,
+            onPressed: () => _changeState(3),
           ),
         ),
       );

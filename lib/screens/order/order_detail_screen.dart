@@ -486,6 +486,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         const SnackBar(content: Text('Viaje finalizado'), backgroundColor: Colors.orange),
       );
     } else {
+      // Google Play policy: mostrar aviso destacado antes de acceder a
+      // ubicación en segundo plano (ACCESS_BACKGROUND_LOCATION).
+      final disclosureOk = await _ensureLocationDisclosureAccepted();
+      if (!disclosureOk) return;
+
       final hasAnotherActiveTrip =
           tracker.enViaje &&
           tracker.activeOrderId != null &&
@@ -539,6 +544,76 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         );
       }
     }
+  }
+
+  // ── Aviso destacado de ubicación en segundo plano ──────────────────────────
+  // Clave SharedPreferences para recordar si el usuario ya aceptó el aviso.
+  static const _kLocationDisclosureKey = 'location_bg_disclosure_accepted';
+
+  /// Muestra un diálogo de aviso destacado sobre el uso de ubicación en
+  /// segundo plano, tal como requiere la política de Google Play.
+  /// Solo se muestra la primera vez; las siguientes devuelve `true` directamente.
+  Future<bool> _ensureLocationDisclosureAccepted() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kLocationDisclosureKey) == true) return true;
+    if (!mounted) return false;
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.location_on_rounded, color: Color(0xFF2563EB), size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Uso de ubicación en segundo plano',
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Next Os Delivery necesita acceder a tu ubicación mientras '
+              'la app está en segundo plano para:',
+            ),
+            SizedBox(height: 10),
+            Text('• Rastrear el progreso de tus entregas en tiempo real'),
+            SizedBox(height: 4),
+            Text('• Mantener el seguimiento activo mientras usas otras apps'),
+            SizedBox(height: 4),
+            Text('• Reportar tu posición al equipo de operaciones durante el viaje'),
+            SizedBox(height: 12),
+            Text(
+              'Tu ubicación solo se comparte mientras tienes un viaje activo. '
+              'Puedes detenerlo en cualquier momento desde esta pantalla.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Entendido, continuar'),
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (accepted) {
+      await prefs.setBool(_kLocationDisclosureKey, true);
+    }
+    return accepted;
   }
 
   @override

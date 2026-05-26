@@ -94,12 +94,9 @@ class ApiService {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      if (parsed is String) {
-        throw ApiException(
-          statusCode: -1,
-          message: 'Respuesta invalida del servidor',
-        );
-      }
+      // El servidor puede responder con texto plano (ej. "Updated", "OK") en
+      // operaciones de escritura exitosas — no es un error, retornamos null.
+      if (parsed is String) return null;
       return parsed;
     }
 

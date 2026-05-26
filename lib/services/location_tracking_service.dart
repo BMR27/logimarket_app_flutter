@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
 import 'background_location_task.dart';
@@ -62,6 +63,14 @@ class LocationTrackingService {
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       throw Exception('Permiso de ubicación denegado');
+    }
+    // Solicitar permiso de ubicación en segundo plano (Android 10+).
+    // El aviso destacado ya fue mostrado en la UI antes de llegar aqui.
+    if (await Permission.locationAlways.isDenied) {
+      await Permission.locationAlways.request();
+      // No lanzamos excepción si es denegado: el foreground service con
+      // notificación visible puede operar sin "siempre", aunque con
+      // limitaciones cuando la app está completamente en segundo plano.
     }
   }
 
