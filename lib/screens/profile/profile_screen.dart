@@ -308,8 +308,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         // ── Acciones admin ────────────────────────────────────────────
         if (user != null &&
-            (user.type.toLowerCase() == 'admin' ||
-                user.type.toLowerCase() == 'lider')) ...
+          (user.type.toLowerCase().contains('admin') ||
+            user.type.toLowerCase().contains('lider'))) ...
           [
             _SectionHeader(title: 'Administración'),
             OutlinedButton.icon(

@@ -46,7 +46,7 @@ class AuthProvider extends ChangeNotifier {
   /// Devuelve true si el usuario es mensajero (no admin ni lider).
   bool _isMensajero(UserModel user) {
     final t = user.type.toLowerCase();
-    return t != 'admin' && t != 'lider';
+    return !t.contains('admin') && !t.contains('lider');
   }
 
   /// Arranca el tracking de ubicación en background si el usuario es mensajero.

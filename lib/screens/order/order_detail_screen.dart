@@ -736,8 +736,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         final primaryBackpack = enRuta.isNotEmpty
             ? enRuta.first
             : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
-        final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
-            auth.user?.type.toLowerCase() == 'lider';
+        final userType = auth.user?.type.toLowerCase() ?? '';
+        final isAdmin = userType.contains('admin') || userType.contains('lider');
         await backpacksProvider.loadMapItems(
           isAdmin: isAdmin,
           userId: auth.user!.idUsuario,

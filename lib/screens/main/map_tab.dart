@@ -776,8 +776,8 @@ class _MapTabState extends State<MapTab> {
     final mapNav = context.watch<MapNavigationProvider>();
     final isNavigating = mapNav.destination != null;
 
-    final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
-        auth.user?.type.toLowerCase() == 'lider';
+    final userType = auth.user?.type.toLowerCase() ?? '';
+    final isAdmin = userType.contains('admin') || userType.contains('lider');
     final enRutaBackpacks = backpacks.backpacks.where((b) => b.state == 2).toList();
     final hasEnRutaBackpack = enRutaBackpacks.isNotEmpty;
     final enRutaBackpackIds = enRutaBackpacks.map((b) => b.id).toSet();

@@ -26,7 +26,7 @@ class _MainScreenState extends State<MainScreen> {
 
   bool _isAdminOrLeader(AuthProvider auth) {
     final type = auth.user?.type.toLowerCase() ?? '';
-    return type == 'admin' || type == 'lider';
+    return type.contains('admin') || type.contains('lider');
   }
 
   bool _isActiveBackpackState(int state) => state == 1 || state == 2;
@@ -152,8 +152,8 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final isAdmin = auth.user?.type.toLowerCase() == 'admin' ||
-        auth.user?.type.toLowerCase() == 'lider';
+    final userType = auth.user?.type.toLowerCase() ?? '';
+    final isAdmin = userType.contains('admin') || userType.contains('lider');
 
     final tabs = [
       const MapTab(),
