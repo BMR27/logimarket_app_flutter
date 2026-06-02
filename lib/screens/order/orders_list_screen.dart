@@ -206,6 +206,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       );
     }
     final visibleOrders = _buildVisibleOrders(allOrders, _searchCtrl.text, _activeFilter);
+    final hasCachedDataWithError = allOrders.isNotEmpty && ordersProvider.errorMessage != null;
     final summary = _buildSummary(allOrders);
     final commissionSummary = _buildCommissionSummary(allOrders);
 
@@ -351,6 +352,33 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
             ),
           ),
 
+        // Aviso no bloqueante: hay datos para trabajar, pero la última actualización falló.
+        if (!ordersProvider.offline && hasCachedDataWithError)
+          Container(
+            color: Colors.amber.shade50,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Colors.amber.shade800),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    ordersProvider.errorMessage!,
+                    style: TextStyle(color: Colors.amber.shade900, fontSize: 12),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _loadOrdersWithEquipos(auth, ordersProvider),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Reintentar', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+
         // Lista
         Expanded(
             child: (ordersProvider.loading || _bootstrapping) && ordersProvider.orders.isEmpty
@@ -387,7 +415,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     AuthProvider auth,
     bool allEmpty,
   ) {
-    final hasError = ordersProvider.errorMessage != null;
+    final hasError = ordersProvider.errorMessage != null && allEmpty;
     final hasFilter = _activeFilter != DeliveryFilter.all || _searchCtrl.text.isNotEmpty;
 
     return ListView(

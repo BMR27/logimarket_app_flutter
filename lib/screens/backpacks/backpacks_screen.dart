@@ -18,6 +18,42 @@ class BackpacksScreen extends StatefulWidget {
 }
 
 class _BackpacksScreenState extends State<BackpacksScreen> {
+  Widget _buildInlineNotice(String message, VoidCallback onRetry) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off, color: Colors.orange.shade700, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: Colors.orange.shade900,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildErrorState(String message, VoidCallback onRetry) {
     final isSessionMessage = message.toLowerCase().contains('sesión');
     final title = isSessionMessage ? 'Sesión finalizada' : 'Ocurrió un problema';
@@ -105,18 +141,22 @@ class _BackpacksScreenState extends State<BackpacksScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<BackpacksProvider>();
     final auth = context.watch<AuthProvider>();
+    final hasBackpacks = provider.backpacks.isNotEmpty;
+    final hasError = provider.errorMessage != null;
+    final showBlockingError = hasError && !hasBackpacks;
+    final showInlineNotice = hasError && hasBackpacks;
 
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () => provider.loadBackpacks(auth.user!.idUsuario),
         child: provider.loadingBackpacks
             ? _buildShimmer()
-            : provider.errorMessage != null
+            : showBlockingError
                 ? _buildErrorState(
                     provider.errorMessage!,
                     () => provider.loadBackpacks(auth.user!.idUsuario),
                   )
-                : provider.backpacks.isEmpty
+                : !hasBackpacks
                     ? ListView(
                         children: [
                           const SizedBox(height: 60),
@@ -139,11 +179,20 @@ class _BackpacksScreenState extends State<BackpacksScreen> {
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.all(12),
-                        itemCount: provider.backpacks.length,
-                        itemBuilder: (_, i) => _BackpackCard(
-                          backpack: provider.backpacks[i],
-                          isAdmin: widget.isAdmin,
-                        ),
+                        itemCount: provider.backpacks.length + (showInlineNotice ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (showInlineNotice && i == 0) {
+                            return _buildInlineNotice(
+                              provider.errorMessage!,
+                              () => provider.loadBackpacks(auth.user!.idUsuario),
+                            );
+                          }
+                          final dataIndex = i - (showInlineNotice ? 1 : 0);
+                          return _BackpackCard(
+                            backpack: provider.backpacks[dataIndex],
+                            isAdmin: widget.isAdmin,
+                          );
+                        },
                       ),
       ),
       floatingActionButton: widget.isAdmin

@@ -28,8 +28,6 @@
 	<string>AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Logimarket necesita la cámara para escanear códigos de barras y QR de los pedidos.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Logimarket necesita tu ubicación en segundo plano para el seguimiento de rutas de entrega.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

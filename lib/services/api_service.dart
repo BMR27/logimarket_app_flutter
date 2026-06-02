@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -22,18 +23,34 @@ class ApiService {
     };
   }
 
+  Future<bool> _hasNetworkInterface() async {
+    final results = await Connectivity().checkConnectivity();
+    return results.any((r) => r != ConnectivityResult.none);
+  }
+
+  Future<Never> _throwNetworkException(Object e) async {
+    final hasInterface = await _hasNetworkInterface();
+    if (e is TimeoutException) {
+      throw ApiException(statusCode: 408, message: 'El servidor no responde');
+    }
+    if (!hasInterface) {
+      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
+    }
+    throw ApiException(statusCode: 503, message: 'No se pudo conectar con el servidor');
+  }
+
   Future<dynamic> get(String url) async {
     try {
       final response = await http
           .get(Uri.parse(url), headers: await _headers())
           .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
-    } on SocketException {
-      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
-    } on TimeoutException {
-      throw ApiException(statusCode: 0, message: 'El servidor no responde');
-    } on http.ClientException {
-      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
+    } on SocketException catch (e) {
+      await _throwNetworkException(e);
+    } on TimeoutException catch (e) {
+      await _throwNetworkException(e);
+    } on http.ClientException catch (e) {
+      await _throwNetworkException(e);
     }
   }
 
@@ -43,12 +60,12 @@ class ApiService {
           .post(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
           .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
-    } on SocketException {
-      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
-    } on TimeoutException {
-      throw ApiException(statusCode: 0, message: 'El servidor no responde');
-    } on http.ClientException {
-      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
+    } on SocketException catch (e) {
+      await _throwNetworkException(e);
+    } on TimeoutException catch (e) {
+      await _throwNetworkException(e);
+    } on http.ClientException catch (e) {
+      await _throwNetworkException(e);
     }
   }
 
@@ -58,12 +75,12 @@ class ApiService {
           .put(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
           .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
-    } on SocketException {
-      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
-    } on TimeoutException {
-      throw ApiException(statusCode: 0, message: 'El servidor no responde');
-    } on http.ClientException {
-      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
+    } on SocketException catch (e) {
+      await _throwNetworkException(e);
+    } on TimeoutException catch (e) {
+      await _throwNetworkException(e);
+    } on http.ClientException catch (e) {
+      await _throwNetworkException(e);
     }
   }
 
@@ -73,12 +90,12 @@ class ApiService {
           .delete(Uri.parse(url), headers: await _headers())
           .timeout(const Duration(seconds: 8));
       return _handleResponse(response);
-    } on SocketException {
-      throw ApiException(statusCode: 0, message: 'Sin conexion a internet');
-    } on TimeoutException {
-      throw ApiException(statusCode: 0, message: 'El servidor no responde');
-    } on http.ClientException {
-      throw ApiException(statusCode: 0, message: 'No se pudo conectar con el servidor');
+    } on SocketException catch (e) {
+      await _throwNetworkException(e);
+    } on TimeoutException catch (e) {
+      await _throwNetworkException(e);
+    } on http.ClientException catch (e) {
+      await _throwNetworkException(e);
     }
   }
 

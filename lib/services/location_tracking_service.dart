@@ -64,14 +64,10 @@ class LocationTrackingService {
         permission == LocationPermission.deniedForever) {
       throw Exception('Permiso de ubicación denegado');
     }
-    // Solicitar permiso de ubicación en segundo plano (Android 10+).
-    // El aviso destacado ya fue mostrado en la UI antes de llegar aqui.
-    if (await Permission.locationAlways.isDenied) {
-      await Permission.locationAlways.request();
-      // No lanzamos excepción si es denegado: el foreground service con
-      // notificación visible puede operar sin "siempre", aunque con
-      // limitaciones cuando la app está completamente en segundo plano.
-    }
+    // NOTA: El permiso ACCESS_BACKGROUND_LOCATION se solicita desde la UI
+    // (order_detail_screen.dart) DESPUÉS de mostrar el aviso destacado
+    // obligatorio según la política de Google Play. No se solicita aquí para
+    // garantizar que el usuario vea el aviso antes que el diálogo del sistema.
   }
 
   /// Guarda la config en SharedPreferences para que el isolate background

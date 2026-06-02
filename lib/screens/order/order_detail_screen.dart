@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -612,6 +613,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
     if (accepted) {
       await prefs.setBool(_kLocationDisclosureKey, true);
+      // Solicitar ACCESS_BACKGROUND_LOCATION inmediatamente después de que
+      // el usuario acepta el aviso destacado, antes de que aparezca el
+      // diálogo del sistema operativo.
+      await Permission.locationAlways.request();
     }
     return accepted;
   }

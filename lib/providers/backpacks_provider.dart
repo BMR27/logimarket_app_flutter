@@ -38,9 +38,16 @@ class BackpacksProvider extends ChangeNotifier {
         // Red no disponible — cargar desde caché local
         final cached = await LocalDatabase().getCachedBackpacks(idUsuario);
         _backpacks = cached.where((b) => b.state != 4).toList();
-        _errorMessage = cached.isEmpty ? null : 'Sin conexión — mochilas en caché.';
+        _errorMessage = cached.isEmpty ? 'Sin conexión y sin mochilas guardadas.' : 'Sin conexión — mochilas en caché.';
       } else {
-        _errorMessage = e.message;
+        // Si hay error de servidor/timeout, usar caché local cuando exista.
+        final cached = await LocalDatabase().getCachedBackpacks(idUsuario);
+        if (cached.isNotEmpty) {
+          _backpacks = cached.where((b) => b.state != 4).toList();
+          _errorMessage = e.message;
+        } else {
+          _errorMessage = e.message;
+        }
       }
     }
     _loadingBackpacks = false;
