@@ -83,8 +83,21 @@ class AuthService extends ApiService {
 
   /// Obtiene los equipos del usuario tras login
   Future<List<EquipoModel>> getEquipos(int idUsuario) async {
-    final data = await get(ApiConfig.equipos(idUsuario)) as List;
-    return data.map((e) => EquipoModel.fromJson(e as Map<String, dynamic>)).toList();
+    final raw = await get(ApiConfig.equipos(idUsuario));
+
+    final List<dynamic> listData;
+    if (raw is List) {
+      listData = raw;
+    } else if (raw is Map<String, dynamic> && raw['data'] is List) {
+      listData = raw['data'] as List<dynamic>;
+    } else {
+      throw ApiException(statusCode: 500, message: 'Respuesta invalida al obtener equipos');
+    }
+
+    return listData
+        .whereType<Map<String, dynamic>>()
+        .map(EquipoModel.fromJson)
+        .toList();
   }
 
   Future<void> logout() async {

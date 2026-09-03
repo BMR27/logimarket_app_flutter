@@ -394,12 +394,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       final svc = ApiService();
       await svc.put(ApiConfig.orderNotes(widget.orderId), {'observacionesMensajero': notes});
-      final auth = context.read<AuthProvider>();
-      await context.read<OrdersProvider>().selectOrder(widget.orderId, auth.equiposForQuery);
-      final refreshed = context.read<OrdersProvider>().selectedOrder;
-      if (refreshed != null) {
-        _notesCtrl.text = refreshed.observacionesMensajero ?? notes;
-      }
+      // No se vuelve a pedir la orden para refrescar este campo: si esa petición falla o
+      // hace timeout justo después de guardar, el provider cae de vuelta a su caché
+      // pre-guardado y sobrescribe el texto recién guardado con el valor viejo (vacío),
+      // dando la falsa impresión de que "se borró la información" aunque sí se guardó.
       if (mounted) {
         setState(() => _notesSaved = true);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -547,16 +545,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  // ── Aviso destacado de ubicación en segundo plano ──────────────────────────
-  // Clave SharedPreferences para recordar si el usuario ya aceptó el aviso.
-  static const _kLocationDisclosureKey = 'location_bg_disclosure_accepted';
-
-  /// Muestra un diálogo de aviso destacado sobre el uso de ubicación en
-  /// segundo plano, tal como requiere la política de Google Play.
-  /// Solo se muestra la primera vez; las siguientes devuelve `true` directamente.
+  // ── Aviso destacado de ubicacion en segundo plano ─────────────────────────
+  /// Muestra un dialogo de aviso destacado sobre el uso de ubicacion en
+  /// segundo plano, tal como requiere la politica de Google Play.
+  /// Debe mostrarse inmediatamente antes del permiso del sistema.
   Future<bool> _ensureLocationDisclosureAccepted() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_kLocationDisclosureKey) == true) return true;
     if (!mounted) return false;
 
     final accepted = await showDialog<bool>(
@@ -570,7 +563,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Uso de ubicación en segundo plano',
+                'Uso de ubicacion en segundo plano',
                 style: TextStyle(fontSize: 16),
               ),
             ),
@@ -581,7 +574,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Next Os Delivery necesita acceder a tu ubicación mientras '
+              'Next Os Delivery necesita acceder a tu ubicacion mientras '
               'la app está en segundo plano para:',
             ),
             SizedBox(height: 10),
@@ -592,7 +585,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             Text('• Reportar tu posición al equipo de operaciones durante el viaje'),
             SizedBox(height: 12),
             Text(
-              'Tu ubicación solo se comparte mientras tienes un viaje activo. '
+              'Tu ubicacion solo se comparte mientras tienes un viaje activo. '
               'Puedes detenerlo en cualquier momento desde esta pantalla.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
@@ -612,7 +605,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     ) ?? false;
 
     if (accepted) {
-      await prefs.setBool(_kLocationDisclosureKey, true);
       // Solicitar ACCESS_BACKGROUND_LOCATION inmediatamente después de que
       // el usuario acepta el aviso destacado, antes de que aparezca el
       // diálogo del sistema operativo.

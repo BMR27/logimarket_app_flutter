@@ -56,13 +56,12 @@ class LocationTrackingService {
     if (!serviceEnabled) {
       throw Exception('Activa el GPS del dispositivo para iniciar viaje');
     }
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      throw Exception('Permiso de ubicación denegado');
+    final permission = await Geolocator.checkPermission();
+    if (permission != LocationPermission.whileInUse &&
+        permission != LocationPermission.always) {
+      // No solicitar permiso aqui para cumplir Play policy: el permiso solo
+      // se pide desde pantallas con aviso destacado visible para el usuario.
+      throw Exception('Permiso de ubicacion pendiente. Abre Mapa o Iniciar viaje para autorizarlo.');
     }
     // NOTA: El permiso ACCESS_BACKGROUND_LOCATION se solicita desde la UI
     // (order_detail_screen.dart) DESPUÉS de mostrar el aviso destacado

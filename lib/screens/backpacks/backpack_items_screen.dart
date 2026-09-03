@@ -68,6 +68,41 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
     return '${meters.toInt()} m';
   }
 
+  Future<bool> _ensureForegroundLocationDisclosure() async {
+    if (!mounted) return false;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Permiso de ubicacion'),
+        content: const Text(
+          'Necesitamos tu ubicacion para ordenar las ordenes por distancia '
+          'desde tu posicion actual. La ubicacion solo se usa en esta pantalla.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No permitir'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (!accepted) return false;
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.unableToDetermine) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always;
+  }
+
   Future<void> _toggleSortByDistance() async {
     if (_sortByDistance) {
       setState(() => _sortByDistance = false);
@@ -75,6 +110,11 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
     }
     setState(() => _loadingLocation = true);
     try {
+      final allowed = await _ensureForegroundLocationDisclosure();
+      if (!allowed) {
+        setState(() => _loadingLocation = false);
+        return;
+      }
       Position pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       ).timeout(const Duration(seconds: 10));
@@ -386,7 +426,7 @@ class _ActionButtonsState extends State<_ActionButtons> {
         content: newState == 3 && pendientes > 0
             ? Text(
                 '¿Confirmas que finalizas la mochila?\n\n'
-                'Atención: $pendientes orden(es) no han sido validada(s).',
+                'Nota: $pendientes orden(es) aún no han sido validada(s), pero puedes finalizar de todas formas.',
               )
             : Text(newState == 2
                 ? '¿Confirmas que aceptas esta mochila y empiezas la ruta?'

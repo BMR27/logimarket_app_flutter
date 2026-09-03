@@ -28,7 +28,7 @@ class _MainScreenState extends State<MainScreen> {
     return type.contains('admin') || type.contains('lider');
   }
 
-  bool _isActiveBackpackState(int state) => state == 1 || state == 2;
+  bool _isActiveBackpackState(int state) => state == 2;
 
   @override
   void initState() {

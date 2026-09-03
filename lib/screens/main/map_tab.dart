@@ -55,11 +55,76 @@ class _MapTabState extends State<MapTab> {
     _requestLocationPermission();
   }
 
+  Future<bool> _showForegroundLocationDisclosure() async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on_rounded, color: Color(0xFF2563EB), size: 22),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Permiso de ubicacion',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            content: const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Next Os Delivery necesita acceder a tu ubicacion para:',
+                ),
+                SizedBox(height: 10),
+                Text('• Mostrar tus ordenes de entrega en el mapa'),
+                SizedBox(height: 4),
+                Text('• Centrar el mapa en tu posicion actual'),
+                SizedBox(height: 4),
+                Text('• Calcular rutas hacia los puntos de entrega'),
+                SizedBox(height: 12),
+                Text(
+                  'La ubicacion solo se usa mientras la app esta abierta.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('No permitir'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continuar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> _requestLocationPermission() async {
     LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+    // Si ya tiene permiso concedido, arrancar sin mostrar diálogo.
+    if (permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always) {
+      _startLocationUpdates();
+      return;
     }
+
+    // Google Play policy: mostrar aviso destacado INMEDIATAMENTE antes
+    // de cada solicitud de permiso del sistema.
+    final accepted = await _showForegroundLocationDisclosure();
+    if (!accepted) return;
+
+    if (!mounted) return;
+    permission = await Geolocator.requestPermission();
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
       _startLocationUpdates();

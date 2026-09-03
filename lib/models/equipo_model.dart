@@ -11,10 +11,27 @@ class EquipoModel {
     required this.lider,
   });
 
+  static int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim()) ?? 0;
+    return 0;
+  }
+
+  static bool _toBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == '1' || normalized == 'true' || normalized == 'si' || normalized == 'sí';
+    }
+    return false;
+  }
+
   factory EquipoModel.fromJson(Map<String, dynamic> json) => EquipoModel(
-        idEquipo: (json['idEquipo'] ?? json['IdEquipo'] ?? 0) as int,
-        equipo: json['equipo'] ?? json['Equipo'] ?? '',
-        nomenclatura: json['nomenclatura'] ?? json['Nomenclatura'] ?? '',
-        lider: json['lider'] == true || json['lider'] == 1,
+        idEquipo: _toInt(json['idEquipo'] ?? json['IdEquipo']),
+        equipo: (json['equipo'] ?? json['Equipo'] ?? '').toString(),
+        nomenclatura: (json['nomenclatura'] ?? json['Nomenclatura'] ?? '').toString(),
+        lider: _toBool(json['lider']),
       );
 }

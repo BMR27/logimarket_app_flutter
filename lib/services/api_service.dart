@@ -43,7 +43,7 @@ class ApiService {
     try {
       final response = await http
           .get(Uri.parse(url), headers: await _headers())
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
     } on SocketException catch (e) {
       await _throwNetworkException(e);
@@ -58,7 +58,7 @@ class ApiService {
     try {
       final response = await http
           .post(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
     } on SocketException catch (e) {
       await _throwNetworkException(e);
@@ -73,7 +73,7 @@ class ApiService {
     try {
       final response = await http
           .put(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
     } on SocketException catch (e) {
       await _throwNetworkException(e);
@@ -88,7 +88,7 @@ class ApiService {
     try {
       final response = await http
           .delete(Uri.parse(url), headers: await _headers())
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
     } on SocketException catch (e) {
       await _throwNetworkException(e);

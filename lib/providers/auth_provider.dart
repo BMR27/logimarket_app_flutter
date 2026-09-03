@@ -164,7 +164,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Error de conexión, revisa tu internet';
+      _errorMessage = 'Error inesperado en login: ${e.toString()}';
       _loading = false;
       notifyListeners();
       return false;
