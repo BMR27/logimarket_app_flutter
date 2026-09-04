@@ -17,6 +17,7 @@ class OrderModel {
   final String descripcionFachada;
   final String notas;
   final double total;
+  final double? comisionEquipo;
   final String? observacionesMensajero;
   final int idStatus;
   final int idMotivoStatus;
@@ -51,6 +52,7 @@ class OrderModel {
     required this.descripcionFachada,
     required this.notas,
     required this.total,
+    this.comisionEquipo,
     this.observacionesMensajero,
     required this.idStatus,
     required this.idMotivoStatus,
@@ -96,6 +98,7 @@ class OrderModel {
       descripcionFachada: descripcionFachada,
       notas: notas,
       total: total,
+      comisionEquipo: comisionEquipo,
       observacionesMensajero: observacionesMensajero,
       idStatus: idStatus,
       idMotivoStatus: idMotivoStatus,
@@ -132,6 +135,9 @@ class OrderModel {
         descripcionFachada: _asString(json['descripcionFachada'] ?? json['DescripcionFachada']),
         notas: _asString(json['notas'] ?? json['Notas']),
         total: _asDouble(json['total'] ?? json['Total']),
+        comisionEquipo: (json['comisionEquipo'] ?? json['ComisionEquipo']) != null
+            ? _asDouble(json['comisionEquipo'] ?? json['ComisionEquipo'])
+            : null,
         observacionesMensajero: (json['observacionesMensajero'] ??
             json['ObservacionesMensajero'] ??
             json['observaciones_mensajero'])

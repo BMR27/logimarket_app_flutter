@@ -398,7 +398,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                           itemBuilder: (ctx, i) =>
                               _OrderCard(
                           order: visibleOrders[i],
-                          commissionFlat: _isDelivered(visibleOrders[i].idStatus) ? commissionSummary.commissionFlat : 0,
                           isDelivered: _isDelivered(visibleOrders[i].idStatus),
                           isIncidencia: _isIncidencia(visibleOrders[i].idStatus),
                               ),
@@ -539,14 +538,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   bool _isEnRuta(int status) => status == 3 || status == 7;
   bool _isIncidencia(int status) => status == 4 || status == 5 || status == 6;
 
-  double _commissionPerOrder(int totalOrders, int deliveredCount) {
-    if (totalOrders == 0) return 0;
-    final rate = deliveredCount / totalOrders * 100;
-    if (rate >= 60) return 110;
-    if (rate >= 55) return 100;
-    return 90;
-  }
-
   int _priorityRank(int status) {
     if (_isEnRuta(status)) return 0;
     if (!_isDelivered(status) && !_isIncidencia(status)) return 1;
@@ -562,17 +553,17 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     final totalOrders = orders.length;
     final deliveredCount = orders.where((o) => _isDelivered(o.idStatus)).length;
     final successRate = totalOrders > 0 ? deliveredCount / totalOrders * 100 : 0.0;
-    final commissionFlat = _commissionPerOrder(totalOrders, deliveredCount);
-    final totalCommission = commissionFlat * deliveredCount;
 
     double grandTotal = 0;
     double collected = 0;
     double pendingCollect = 0;
+    double totalCommission = 0;
 
     for (final o in orders) {
       grandTotal += o.total;
       if (_isDelivered(o.idStatus)) {
         collected += o.total;
+        totalCommission += o.comisionEquipo ?? 0;
       } else if (!_isIncidencia(o.idStatus)) {
         pendingCollect += o.total;
       }
@@ -582,7 +573,6 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       totalOrders: totalOrders,
       deliveredCount: deliveredCount,
       successRate: successRate,
-      commissionFlat: commissionFlat,
       totalCommission: totalCommission,
       grandTotal: grandTotal,
       collected: collected,
@@ -612,13 +602,11 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
 class _OrderCard extends StatelessWidget {
   final OrderModel order;
-  final double commissionFlat;
   final bool isDelivered;
   final bool isIncidencia;
 
   const _OrderCard({
     required this.order,
-    required this.commissionFlat,
     required this.isDelivered,
     required this.isIncidencia,
   });
@@ -643,6 +631,7 @@ class _OrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isActiveDelivery = _isActiveDelivery;
+    final comision = order.comisionEquipo ?? 0;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       color: isActiveDelivery ? Colors.cyan.shade50 : null,
@@ -725,8 +714,8 @@ class _OrderCard extends StatelessWidget {
               isIncidencia
                   ? 'Comisión en riesgo por incidencia'
                   : isDelivered
-                        ? 'Comisión acreditable: \$${commissionFlat.toStringAsFixed(0)}'
-                        : 'Comisión pot.: \$${commissionFlat.toStringAsFixed(0)} al entregar',
+                        ? 'Comisión acreditable: \$${comision.toStringAsFixed(0)}'
+                        : 'Comisión pot.: \$${comision.toStringAsFixed(0)} al entregar',
               style: TextStyle(
                 fontSize: 11,
                 color: isIncidencia
@@ -745,12 +734,12 @@ class _OrderCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '\$${order.total.toStringAsFixed(2)}',
+              '\$${comision.toStringAsFixed(2)}',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
             Text(
-              'Com. \$${commissionFlat.toStringAsFixed(0)}',
+              'Orden: \$${order.total.toStringAsFixed(2)}',
               style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ],
@@ -826,8 +815,7 @@ class _CommissionSummary {
   final int totalOrders;
   final int deliveredCount;
   final double successRate;
-  final double commissionFlat;    // 0, 90, 100 o 110 por entrega exitosa
-  final double totalCommission;   // commissionFlat × deliveredCount
+  final double totalCommission;   // suma de comisionEquipo (real, por tabulador) de órdenes entregadas
   final double grandTotal;        // suma de totales de TODAS las órdenes
   final double collected;         // suma de totales de órdenes exitosas (ya recolectado)
   final double pendingCollect;    // suma de totales de órdenes pendientes/en ruta
@@ -836,7 +824,6 @@ class _CommissionSummary {
     required this.totalOrders,
     required this.deliveredCount,
     required this.successRate,
-    required this.commissionFlat,
     required this.totalCommission,
     required this.grandTotal,
     required this.collected,
@@ -853,16 +840,6 @@ class _CommissionBoard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rateStr = '${summary.successRate.toStringAsFixed(0)}%';
-    final tierLabel = summary.commissionFlat > 0
-        ? '\$${summary.commissionFlat.toStringAsFixed(0)} / entrega'
-      : 'Sin datos';
-    final tierColor = summary.commissionFlat >= 110
-        ? Colors.greenAccent
-        : summary.commissionFlat >= 100
-            ? Colors.lightGreenAccent
-            : summary.commissionFlat >= 90
-                ? Colors.yellowAccent
-                : Colors.redAccent;
 
     return Container(
       width: double.infinity,
@@ -922,23 +899,6 @@ class _CommissionBoard extends StatelessWidget {
                 child: Text(
                   'comisión total',
                   style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12),
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: tierColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: tierColor.withOpacity(0.6)),
-                ),
-                child: Text(
-                  tierLabel,
-                  style: TextStyle(
-                    color: tierColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
                 ),
               ),
             ],

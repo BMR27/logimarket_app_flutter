@@ -19,7 +19,7 @@ class LocalDatabase {
     final path = join(await getDatabasesPath(), 'logimarket_offline.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE ordenes (
@@ -43,6 +43,7 @@ class LocalDatabase {
             descripcionFachada TEXT,
             notas TEXT,
             total REAL,
+            comisionEquipo REAL,
             fechaPedido TEXT,
             fechaEntrega TEXT,
             statusOrden TEXT,
@@ -144,6 +145,9 @@ class LocalDatabase {
             )
           ''');
         }
+        if (oldVersion < 5) {
+          await db.execute('ALTER TABLE ordenes ADD COLUMN comisionEquipo REAL');
+        }
       },
     );
   }
@@ -175,6 +179,7 @@ class LocalDatabase {
         'descripcionFachada': order.descripcionFachada,
         'notas': order.notas,
         'total': order.total,
+        'comisionEquipo': order.comisionEquipo,
         'fechaPedido': order.fechaPedido,
         'fechaEntrega': order.fechaEntrega,
         'statusOrden': order.statusOrden,

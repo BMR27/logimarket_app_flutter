@@ -1086,11 +1086,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             _Section(title: 'Resumen financiero', children: [
               ListTile(
                 dense: true,
-                leading: const Icon(Icons.attach_money, color: Colors.green),
+                leading: const Icon(Icons.card_giftcard, color: Colors.green),
+                title: const Text('Comisión de equipo'),
+                trailing: Text(
+                  '\$${(order.comisionEquipo ?? 0).toStringAsFixed(2)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green),
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.attach_money, color: Colors.grey),
                 title: const Text('Total de la orden'),
                 trailing: Text(
                   '\$${order.total.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.grey),
                 ),
               ),
               if (_loadingPriceRequest)
