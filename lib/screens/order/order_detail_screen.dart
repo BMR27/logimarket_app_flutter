@@ -668,12 +668,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _save() async {
     final auth = context.read<AuthProvider>();
     final order = context.read<OrdersProvider>().selectedOrder;
-    if (order != null && order.idStatus == 4) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('La orden ya esta Cancelada y no puede modificarse')),
-      );
-      return;
-    }
     if (_selectedStatus == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecciona un status')),
