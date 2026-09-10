@@ -19,7 +19,7 @@ class LocalDatabase {
     final path = join(await getDatabasesPath(), 'logimarket_offline.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE ordenes (
@@ -110,6 +110,26 @@ class LocalDatabase {
             PRIMARY KEY (idUsuario, idBackpack)
           )
         ''');
+
+        await db.execute('''
+          CREATE TABLE pending_backpack_ops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            idBackpack INTEGER NOT NULL,
+            opType TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            lastError TEXT
+          )
+        ''');
+
+        await db.execute('''
+          CREATE TABLE pending_notes (
+            idOrden INTEGER PRIMARY KEY,
+            notas TEXT NOT NULL,
+            createdAt TEXT NOT NULL
+          )
+        ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -147,6 +167,28 @@ class LocalDatabase {
         }
         if (oldVersion < 5) {
           await db.execute('ALTER TABLE ordenes ADD COLUMN comisionEquipo REAL');
+        }
+        if (oldVersion < 6) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS pending_backpack_ops (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              idBackpack INTEGER NOT NULL,
+              opType TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              createdAt TEXT NOT NULL,
+              attempts INTEGER NOT NULL DEFAULT 0,
+              lastError TEXT
+            )
+          ''');
+        }
+        if (oldVersion < 7) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS pending_notes (
+              idOrden INTEGER PRIMARY KEY,
+              notas TEXT NOT NULL,
+              createdAt TEXT NOT NULL
+            )
+          ''');
         }
       },
     );
@@ -332,5 +374,67 @@ class LocalDatabase {
   Future<void> deletePendingEvidence(int id) async {
     final database = await db;
     await database.delete('pending_evidence', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ─── Cola de operaciones de mochila offline ────────────────────────────────
+
+  Future<int> savePendingBackpackOp({
+    required int idBackpack,
+    required String opType,
+    required Map<String, dynamic> payload,
+  }) async {
+    final database = await db;
+    return database.insert('pending_backpack_ops', {
+      'idBackpack': idBackpack,
+      'opType': opType,
+      'payload': jsonEncode(payload),
+      'createdAt': DateTime.now().toIso8601String(),
+      'attempts': 0,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getPendingBackpackOps() async {
+    final database = await db;
+    return database.query('pending_backpack_ops', orderBy: 'id ASC');
+  }
+
+  Future<void> deletePendingBackpackOp(int id) async {
+    final database = await db;
+    await database.delete('pending_backpack_ops', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> markPendingBackpackOpFailed(int id, String error) async {
+    final database = await db;
+    await database.rawUpdate(
+      'UPDATE pending_backpack_ops SET attempts = attempts + 1, lastError = ? WHERE id = ?',
+      [error, id],
+    );
+  }
+
+  // ─── Notas de orden pendientes de sincronizar ──────────────────────────────
+  // PK por idOrden: si el mensajero edita la nota varias veces offline, solo
+  // se conserva/reenvía la última versión (REPLACE), no una por cada edición.
+
+  Future<void> savePendingNote({required int idOrden, required String notas}) async {
+    final database = await db;
+    await database.insert(
+      'pending_notes',
+      {
+        'idOrden': idOrden,
+        'notas': notas,
+        'createdAt': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getPendingNotes() async {
+    final database = await db;
+    return database.query('pending_notes', orderBy: 'createdAt ASC');
+  }
+
+  Future<void> deletePendingNote(int idOrden) async {
+    final database = await db;
+    await database.delete('pending_notes', where: 'idOrden = ?', whereArgs: [idOrden]);
   }
 }

@@ -165,21 +165,12 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
     if (result == null || !mounted) return;
     final scannedFolio = result.trim();
 
-    // Buscar el ítem por folio escaneado
-    final items = context.read<BackpacksProvider>().selectedItems;
-    final item = items.cast<BackpackItemModel?>().firstWhere(
-          (i) => i?.folioOrden.trim() == scannedFolio,
-          orElse: () => null,
-        );
-
-    if (item == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Folio $scannedFolio no encontrado en esta mochila')),
-      );
-      return;
-    }
-
-    final ok = await context.read<BackpacksProvider>().validateItemByFolio(
+    // Ya no se corta aquí si el folio no está en la lista cargada en memoria:
+    // el endpoint de validación trabaja por folio (no requiere idBackpackItem
+    // conocido de antemano), y sin red igual se encola por folio para
+    // reconciliarse al sincronizar.
+    final provider = context.read<BackpacksProvider>();
+    final ok = await provider.validateItemByFolio(
       idBackpack: widget.backpackId,
       folio: scannedFolio,
     );
@@ -189,7 +180,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            context.read<BackpacksProvider>().errorMessage ?? 'No se pudo validar la orden',
+            provider.errorMessage ?? 'No se pudo validar la orden',
           ),
         ),
       );
@@ -197,7 +188,13 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Orden $scannedFolio validada correctamente')),
+      SnackBar(
+        content: Text(
+          provider.lastActionQueuedOffline
+              ? 'Sin conexión — orden $scannedFolio guardada offline, se validará al reconectar'
+              : 'Orden $scannedFolio validada correctamente',
+        ),
+      ),
     );
   }
 
@@ -449,12 +446,14 @@ class _ActionButtonsState extends State<_ActionButtons> {
     if (updated) {
       widget.onStateUpdated?.call(newState);
 
+      final offline = widget.provider.lastActionQueuedOffline;
+      final accion = newState == 2 ? 'aceptada' : 'finalizada';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            newState == 2
-                ? 'Mochila aceptada correctamente'
-                : 'Mochila finalizada correctamente',
+            offline
+                ? 'Sin conexión — mochila $accion offline, se sincronizará al reconectar'
+                : 'Mochila $accion correctamente',
           ),
         ),
       );

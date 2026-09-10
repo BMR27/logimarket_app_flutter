@@ -40,18 +40,49 @@ class _MainScreenState extends State<MainScreen> {
       _connectivitySub = ConnectivityService.instance.onConnectionRestored.listen((_) {
         _onConnectionRestored();
       });
+      // Cubre el caso de que la app arranque ya con señal habiendo quedado
+      // pendientes de una sesión offline anterior (sin pasar por una
+      // transición offline→online detectada por ConnectivityService).
+      _syncAllPending();
     });
+  }
+
+  /// Sincroniza órdenes/evidencia y operaciones de mochila pendientes.
+  /// Retorna cuántas se sincronizaron y cuántas quedaron fallidas (requieren
+  /// atención manual, ej. un conflicto real del servidor). El snackbar de
+  /// éxito lo maneja cada llamador según su contexto; aquí solo se avisan
+  /// las fallas, porque esas requieren atención sin importar quién dispare el sync.
+  Future<({int synced, int failed})> _syncAllPending() async {
+    if (!mounted) return (synced: 0, failed: 0);
+    final ordersProvider = context.read<OrdersProvider>();
+    final backpacksProvider = context.read<BackpacksProvider>();
+    final ordersSynced = await ordersProvider.syncAllOffline();
+    final backpackResult = await backpacksProvider.syncPendingBackpackOps();
+    final synced = ordersSynced + backpackResult.synced;
+    final failed = backpackResult.failed;
+    if (!mounted) return (synced: synced, failed: failed);
+    if (failed > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$failed operación(es) de mochila no se pudieron sincronizar — revisa la mochila afectada',
+          ),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+    return (synced: synced, failed: failed);
   }
 
   Future<void> _onConnectionRestored() async {
     if (!mounted) return;
-    final ordersProvider = context.read<OrdersProvider>();
-    final synced = await ordersProvider.syncAllOffline();
+    final result = await _syncAllPending();
     await _reloadOrders();
-    if (synced > 0 && mounted) {
+    if (result.synced > 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Conexión restaurada — $synced elemento(s) sincronizado(s)'),
+          content: Text('Conexión restaurada — ${result.synced} elemento(s) sincronizado(s)'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
         ),
@@ -180,11 +211,10 @@ class _MainScreenState extends State<MainScreen> {
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'sync') {
-                final count =
-                    await context.read<OrdersProvider>().syncAllOffline();
+                final result = await _syncAllPending();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('$count elemento(s) sincronizado(s)')),
+                    SnackBar(content: Text('${result.synced} elemento(s) sincronizado(s)')),
                   );
                 }
               } else if (value == 'logout') {

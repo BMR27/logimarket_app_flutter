@@ -7,6 +7,7 @@ import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/map_navigation_provider.dart';
 import '../../providers/backpacks_provider.dart';
+import '../../db/local_database.dart';
 import '../../config/api_config.dart';
 import '../../models/catalogs_model.dart';
 import '../../models/order_model.dart';
@@ -403,6 +404,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Notas guardadas correctamente'), backgroundColor: Colors.green),
         );
+      }
+    } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        await LocalDatabase().savePendingNote(idOrden: widget.orderId, notas: notes);
+        if (mounted) {
+          setState(() => _notesSaved = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión — nota guardada offline, se sincronizará al reconectar'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al guardar notas: ${e.message}')));
       }
     } catch (e) {
       if (mounted) {

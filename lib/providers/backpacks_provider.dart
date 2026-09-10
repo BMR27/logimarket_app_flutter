@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../db/local_database.dart';
 import '../models/backpack_model.dart';
@@ -7,6 +8,7 @@ import '../services/api_service.dart';
 
 class BackpacksProvider extends ChangeNotifier {
   final _service = BackpacksService();
+  final _localDb = LocalDatabase();
 
   List<BackpackModel> _backpacks = [];
   List<BackpackItemModel> _selectedItems = [];
@@ -14,7 +16,9 @@ class BackpacksProvider extends ChangeNotifier {
   int? _selectedBackpackId;
   bool _loadingBackpacks = false;
   bool _loadingItems = false;
+  bool _syncingBackpackOps = false;
   String? _errorMessage;
+  bool _lastActionQueuedOffline = false;
 
   List<BackpackModel> get backpacks => _backpacks;
   List<BackpackItemModel> get selectedItems => _selectedItems;
@@ -22,6 +26,9 @@ class BackpacksProvider extends ChangeNotifier {
   bool get loadingBackpacks => _loadingBackpacks;
   bool get loadingItems => _loadingItems;
   String? get errorMessage => _errorMessage;
+  /// true si la última operación exitosa (validar/eliminar/cambiar estado) se
+  /// guardó localmente porque no había conexión, en vez de aplicarse en el servidor.
+  bool get lastActionQueuedOffline => _lastActionQueuedOffline;
 
   Future<void> loadBackpacks(int idUsuario) async {
     _loadingBackpacks = true;
@@ -221,66 +228,124 @@ class BackpacksProvider extends ChangeNotifier {
   }
 
   Future<bool> updateState(int idBackpack, int state) async {
+    _lastActionQueuedOffline = false;
     try {
       await _service.updateBackpackState(idBackpack, state);
-      final idx = _backpacks.indexWhere((b) => b.id == idBackpack);
-      if (idx >= 0) {
-        _backpacks[idx] = BackpackModel.fromJson({
-          ..._backpackToMap(_backpacks[idx]),
-          'State': state,
-        });
-        notifyListeners();
-      }
+      _applyStateLocally(idBackpack, state);
+      notifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        await _localDb.savePendingBackpackOp(
+          idBackpack: idBackpack,
+          opType: 'update_state',
+          payload: {'state': state},
+        );
+        _applyStateLocally(idBackpack, state);
+        _lastActionQueuedOffline = true;
+        notifyListeners();
+        return true;
+      }
       _errorMessage = e.message;
       notifyListeners();
       return false;
     }
   }
 
+  void _applyStateLocally(int idBackpack, int state) {
+    final idx = _backpacks.indexWhere((b) => b.id == idBackpack);
+    if (idx >= 0) {
+      _backpacks[idx] = BackpackModel.fromJson({
+        ..._backpackToMap(_backpacks[idx]),
+        'State': state,
+      });
+    }
+  }
+
   Future<bool> deleteItem(int idItem) async {
+    _lastActionQueuedOffline = false;
     try {
       await _service.deleteBackpackItem(idItem);
       _selectedItems.removeWhere((i) => i.idBackpackItem == idItem);
       notifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        final item = _selectedItems.cast<BackpackItemModel?>().firstWhere(
+              (i) => i?.idBackpackItem == idItem,
+              orElse: () => null,
+            );
+        await _localDb.savePendingBackpackOp(
+          idBackpack: item?.idBackpack ?? 0,
+          opType: 'delete_item',
+          payload: {'idItem': idItem},
+        );
+        _selectedItems.removeWhere((i) => i.idBackpackItem == idItem);
+        _lastActionQueuedOffline = true;
+        notifyListeners();
+        return true;
+      }
       _errorMessage = e.message;
       notifyListeners();
       return false;
     }
   }
 
-  Future<bool> validateItem(int idItem) async {
-    try {
-      if (idItem <= 0) {
-        _errorMessage = 'No se pudo identificar el ítem a validar';
-        notifyListeners();
-        return false;
-      }
+  void _markItemValidatedLocally({int? idItem, int? idBackpack, String? folio}) {
+    final normalizedFolio = folio?.trim();
+    final idx = _selectedItems.indexWhere((i) {
+      if (idItem != null) return i.idBackpackItem == idItem;
+      return i.idBackpack == idBackpack && i.folioOrden.trim() == normalizedFolio;
+    });
+    if (idx < 0) return;
+    final item = _selectedItems[idx];
+    _selectedItems[idx] = BackpackItemModel.fromJson({
+      'IdBackpack': item.idBackpack,
+      'IdBackPackItem': item.idBackpackItem,
+      'IdOrdenVenta': item.idOrdenVenta,
+      'FolioOrden': item.folioOrden,
+      'IdStatusOrden': item.idStatusOrden,
+      'StatusName': item.statusName,
+      'NombreCliente': item.nombreCliente,
+      'Validation': 1,
+    });
+  }
 
+  Future<bool> validateItem(int idItem) async {
+    _lastActionQueuedOffline = false;
+    if (idItem <= 0) {
+      _errorMessage = 'No se pudo identificar el ítem a validar';
+      notifyListeners();
+      return false;
+    }
+    try {
       await _service.validateBackpackItem(idItem);
-      
       // Actualiza localmente SIN hacer reload del servidor
       // Esto evita conflictos de estado y "Guardado Offline"
-      final idx = _selectedItems.indexWhere((i) => i.idBackpackItem == idItem);
-      if (idx >= 0) {
-        final item = _selectedItems[idx];
-        _selectedItems[idx] = BackpackItemModel.fromJson({
-          'IdBackpack': item.idBackpack,
-          'IdBackPackItem': item.idBackpackItem,
-          'IdOrdenVenta': item.idOrdenVenta,
-          'FolioOrden': item.folioOrden,
-          'IdStatusOrden': item.idStatusOrden,
-          'StatusName': item.statusName,
-          'NombreCliente': item.nombreCliente,
-          'Validation': 1,
-        });
-        notifyListeners();
-      }
+      _markItemValidatedLocally(idItem: idItem);
+      notifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        final item = _selectedItems.cast<BackpackItemModel?>().firstWhere(
+              (i) => i?.idBackpackItem == idItem,
+              orElse: () => null,
+            );
+        if (item == null) {
+          _errorMessage = 'Sin conexión y el ítem no está guardado localmente';
+          notifyListeners();
+          return false;
+        }
+        await _localDb.savePendingBackpackOp(
+          idBackpack: item.idBackpack,
+          opType: 'validate_item',
+          payload: {'idItem': idItem},
+        );
+        _markItemValidatedLocally(idItem: idItem);
+        _lastActionQueuedOffline = true;
+        notifyListeners();
+        return true;
+      }
       _errorMessage = e.message;
       notifyListeners();
       return false;
@@ -291,44 +356,95 @@ class BackpacksProvider extends ChangeNotifier {
     required int idBackpack,
     required String folio,
   }) async {
+    _lastActionQueuedOffline = false;
+    final normalizedFolio = folio.trim();
+    if (idBackpack <= 0 || normalizedFolio.isEmpty) {
+      _errorMessage = 'Datos invalidos para validar la orden';
+      notifyListeners();
+      return false;
+    }
     try {
-      final normalizedFolio = folio.trim();
-      if (idBackpack <= 0 || normalizedFolio.isEmpty) {
-        _errorMessage = 'Datos invalidos para validar la orden';
-        notifyListeners();
-        return false;
-      }
-
       await _service.validateBackpackItemByFolio(
         idBackpack: idBackpack,
         folio: normalizedFolio,
       );
-
-      final idx = _selectedItems.indexWhere(
-        (i) => i.idBackpack == idBackpack && i.folioOrden.trim() == normalizedFolio,
-      );
-
-      if (idx >= 0) {
-        final item = _selectedItems[idx];
-        _selectedItems[idx] = BackpackItemModel.fromJson({
-          'IdBackpack': item.idBackpack,
-          'IdBackPackItem': item.idBackpackItem,
-          'IdOrdenVenta': item.idOrdenVenta,
-          'FolioOrden': item.folioOrden,
-          'IdStatusOrden': item.idStatusOrden,
-          'StatusName': item.statusName,
-          'NombreCliente': item.nombreCliente,
-          'Validation': 1,
-        });
-        notifyListeners();
-      }
-
+      _markItemValidatedLocally(idBackpack: idBackpack, folio: normalizedFolio);
+      notifyListeners();
       return true;
     } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        // Se encola por folio aunque el ítem no esté cacheado localmente: el
+        // endpoint valida por folio, no requiere conocer el idBackpackItem.
+        await _localDb.savePendingBackpackOp(
+          idBackpack: idBackpack,
+          opType: 'validate_folio',
+          payload: {'folio': normalizedFolio},
+        );
+        _markItemValidatedLocally(idBackpack: idBackpack, folio: normalizedFolio);
+        _lastActionQueuedOffline = true;
+        notifyListeners();
+        return true;
+      }
       _errorMessage = e.message;
       notifyListeners();
       return false;
     }
+  }
+
+  /// Reintenta en orden todas las operaciones de mochila guardadas offline.
+  /// Se detiene ante la primera falla por falta de red (sigue offline); ante
+  /// un error real del servidor marca esa fila como fallida y sigue con las
+  /// demás, para no bloquear el resto de la cola por un solo conflicto.
+  /// Devuelve cuántas se sincronizaron y cuántas quedaron marcadas como fallidas.
+  Future<({int synced, int failed})> syncPendingBackpackOps() async {
+    if (_syncingBackpackOps) return (synced: 0, failed: 0);
+    _syncingBackpackOps = true;
+    var synced = 0;
+    var failed = 0;
+    try {
+      final ops = await _localDb.getPendingBackpackOps();
+      for (final op in ops) {
+        final id = op['id'] as int;
+        final opType = op['opType'] as String;
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(op['payload'] as String) as Map,
+        );
+        try {
+          switch (opType) {
+            case 'update_state':
+              await _service.updateBackpackState(
+                op['idBackpack'] as int,
+                payload['state'] as int,
+              );
+              break;
+            case 'delete_item':
+              await _service.deleteBackpackItem(payload['idItem'] as int);
+              break;
+            case 'validate_item':
+              await _service.validateBackpackItem(payload['idItem'] as int);
+              break;
+            case 'validate_folio':
+              await _service.validateBackpackItemByFolio(
+                idBackpack: op['idBackpack'] as int,
+                folio: payload['folio'] as String,
+              );
+              break;
+          }
+          await _localDb.deletePendingBackpackOp(id);
+          synced++;
+        } on ApiException catch (e) {
+          if (e.statusCode == 0) {
+            // Sigue sin red: deja el resto de la cola intacta para el próximo intento.
+            break;
+          }
+          await _localDb.markPendingBackpackOpFailed(id, e.message);
+          failed++;
+        }
+      }
+    } finally {
+      _syncingBackpackOps = false;
+    }
+    return (synced: synced, failed: failed);
   }
 
   Map<String, dynamic> _backpackToMap(BackpackModel b) => {

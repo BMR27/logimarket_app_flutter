@@ -17,6 +17,7 @@ class OrdersProvider extends ChangeNotifier {
   final Map<int, List<ProductModel>> _orderProductsCache = {};
   bool _loading = false;
   bool _offline = false;
+  bool _syncingOffline = false;
   String? _errorMessage;
 
   List<OrderModel> get orders => _orders;
@@ -324,11 +325,42 @@ class OrdersProvider extends ChangeNotifier {
     return synced;
   }
 
-  /// Sincroniza todo lo pendiente (órdenes + evidencias).
-  /// Retorna el total de ítems sincronizados.
+  /// Sube las notas/comentarios de orden guardados offline.
+  Future<int> syncPendingNotes() async {
+    final pending = await _localDb.getPendingNotes();
+    int synced = 0;
+    final svc = ApiService();
+    for (final row in pending) {
+      final idOrden = row['idOrden'] as int;
+      try {
+        await svc.put(ApiConfig.orderNotes(idOrden), {
+          'observacionesMensajero': row['notas'],
+        });
+        await _localDb.deletePendingNote(idOrden);
+        synced++;
+      } on ApiException catch (e) {
+        if (e.statusCode == 0) break; // sigue sin conexión, detener
+      } catch (_) {
+        // Continuar con el siguiente
+      }
+    }
+    return synced;
+  }
+
+  /// Sincroniza todo lo pendiente (órdenes + evidencias + notas).
+  /// Retorna el total de ítems sincronizados. Evita ejecuciones concurrentes:
+  /// se dispara tanto al reconectar como desde el botón manual del menú, y
+  /// ambas pueden coincidir.
   Future<int> syncAllOffline() async {
-    final orders = await syncOfflineOrders();
-    final evidence = await syncPendingEvidence();
-    return orders + evidence;
+    if (_syncingOffline) return 0;
+    _syncingOffline = true;
+    try {
+      final orders = await syncOfflineOrders();
+      final evidence = await syncPendingEvidence();
+      final notes = await syncPendingNotes();
+      return orders + evidence + notes;
+    } finally {
+      _syncingOffline = false;
+    }
   }
 }
