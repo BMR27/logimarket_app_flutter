@@ -473,6 +473,63 @@ class _MapTabState extends State<MapTab> {
     }
   }
 
+  bool _resolvingMissingOrderCoords = false;
+
+  /// Igual que [_resolveMissingCoords] pero para la lista general de órdenes
+  /// (mapa de admin/líder, o mensajero sin mochila "En Ruta" activa). Sin esto,
+  /// las órdenes sin latitud/longitud directa en la BD nunca se muestran ahí.
+  Future<void> _resolveMissingOrderCoords(
+    List<OrderModel> orders,
+    Map<int, LatLng> coordsByOrderId,
+  ) async {
+    if (_resolvingMissingOrderCoords) return;
+
+    List<OrderModel> buildMissingBatch() {
+      final now = DateTime.now();
+      return orders.where((o) {
+        if (coordsByOrderId.containsKey(o.id) ||
+            _derivedCoordsByOrderId.containsKey(o.id)) {
+          return false;
+        }
+        final attempts = _coordLookupAttemptsByOrderId[o.id] ?? 0;
+        if (attempts >= 3) return false;
+        final lastAttemptAt = _coordLastAttemptAtByOrderId[o.id];
+        if (lastAttemptAt != null &&
+            now.difference(lastAttemptAt) < const Duration(seconds: 2)) {
+          return false;
+        }
+        return true;
+      }).take(8).toList();
+    }
+
+    if (buildMissingBatch().isEmpty) return;
+
+    _resolvingMissingOrderCoords = true;
+    try {
+      while (true) {
+        final missing = buildMissingBatch();
+        if (missing.isEmpty) break;
+
+        for (final order in missing) {
+          _coordLookupAttemptsByOrderId[order.id] =
+              (_coordLookupAttemptsByOrderId[order.id] ?? 0) + 1;
+          _coordLastAttemptAtByOrderId[order.id] = DateTime.now();
+
+          final resolved = await _resolveCoordFromOrder(order);
+          if (resolved != null) {
+            _derivedCoordsByOrderId[order.id] = resolved;
+          }
+        }
+
+        if (mounted) setState(() {});
+        await Future.delayed(const Duration(milliseconds: 450));
+      }
+    } finally {
+      _resolvingMissingOrderCoords = false;
+      if (mounted) setState(() {});
+    }
+  }
+
   List<String> _buildAddressCandidates(BackpackItemModel item, OrderModel? order) {
     final candidates = <String>[];
     // Contexto de estado para anclar la búsqueda en la zona correcta
@@ -598,16 +655,28 @@ class _MapTabState extends State<MapTab> {
     }
   }
 
-  void _buildMarkers(List<OrderModel> orders, LatLng? destination) {
+  void _buildMarkers(
+    List<OrderModel> orders,
+    LatLng? destination,
+    Map<int, LatLng> coordsByOrderId,
+    Map<String, LatLng> coordsByFolio,
+  ) {
     _markers = orders
-        .where((o) => o.latitud != null && o.longitud != null)
         .map((o) {
       final lat = _parseCoord(o.latitud);
       final lng = _parseCoord(o.longitud);
-      if (lat == null || lng == null) return null;
+      final directPos = (lat != null && lng != null && _isWithinMexico(lat, lng))
+          ? LatLng(lat, lng)
+          : null;
+      // Si la orden no trae coordenada directa, usar la resuelta por
+      // geocodificación (misma que ya se calcula para las mochilas en ruta).
+      final basePos = directPos ??
+          coordsByOrderId[o.id] ??
+          coordsByFolio[o.folioOrdenCliente.trim()];
+      if (basePos == null) return null;
       return Marker(
         markerId: MarkerId('order_${o.id}'),
-        position: LatLng(lat, lng),
+        position: basePos,
         infoWindow: InfoWindow(
           title: o.folioOrdenCliente,
           snippet: o.cliente,
@@ -946,7 +1015,20 @@ class _MapTabState extends State<MapTab> {
         coordsByFolio,
       );
     } else {
-      _buildMarkers(orders, mapNav.destination);
+      _buildMarkers(orders, mapNav.destination, coordsByOrderId, coordsByFolio);
+
+      final ordersMissingCoords = orders.where((o) {
+        final lat = _parseCoord(o.latitud);
+        final lng = _parseCoord(o.longitud);
+        if (lat != null && lng != null && _isWithinMexico(lat, lng)) return false;
+        return coordsByOrderId[o.id] == null &&
+            coordsByFolio[o.folioOrdenCliente.trim()] == null;
+      }).toList();
+      if (ordersMissingCoords.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _resolveMissingOrderCoords(ordersMissingCoords, coordsByOrderId);
+        });
+      }
     }
 
     if (!isNavigating && !isAdmin && pendingWithCoords.isNotEmpty && !_pinsFramed) {
