@@ -20,6 +20,17 @@ class OrdersProvider extends ChangeNotifier {
   bool _syncingOffline = false;
   String? _errorMessage;
 
+  /// Limpia la lista sin caer en el fallback de caché local de [loadOrdersByIds],
+  /// que asume "sin conexión" ante una lista de ids vacía. Se usa cuando la
+  /// lista está vacía por una razón legítima (ej. el mensajero no tiene
+  /// mochila aceptada todavía), no por un fallo de red.
+  void clearOrders() {
+    _orders = [];
+    _errorMessage = null;
+    _offline = false;
+    notifyListeners();
+  }
+
   List<OrderModel> get orders => _orders;
   OrderModel? get selectedOrder => _selectedOrder;
   List<ProductModel> get products => _products;

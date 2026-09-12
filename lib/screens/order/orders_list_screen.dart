@@ -33,7 +33,10 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
   int _safeParseInt(String value) => int.tryParse(value.trim()) ?? 0;
 
-  bool _isActiveBackpackState(int state) => state == 1 || state == 2;
+  // Solo mochila "En Ruta" (aceptada) cuenta como activa para mostrar sus
+  // órdenes en Entregas — una mochila "Asignada" (1) aún no fue aceptada por
+  // el mensajero, así que sus órdenes no deben verse todavía.
+  bool _isActiveBackpackState(int state) => state == 2;
 
   Set<int> _activeBackpackOrderIds(BackpacksProvider backpacksProvider) {
     final activeBackpackIds = backpacksProvider.backpacks
@@ -140,6 +143,14 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         if (kDebugMode) {
           debugPrint('[ENTREGAS] _loadOrdersWithEquipos: after loadMapItems items=${backpacksProvider.selectedItems.length}');
         }
+      }
+
+      if (activeBackpacks.isEmpty) {
+        // Sin mochila aceptada ("En Ruta") no hay nada que mostrar todavía —
+        // limpiar sin caer en el fallback de caché de loadOrdersByIds, que
+        // asumiría "sin conexión" y mostraría entregas de una mochila previa.
+        ordersProvider.clearOrders();
+        return;
       }
 
       final activeOrderIds = _activeBackpackOrderIds(backpacksProvider).toList();
@@ -391,6 +402,8 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                           ordersProvider,
                           auth,
                           allOrders.isEmpty,
+                          hasPendingBackpack: !isAdminOrLeader &&
+                              backpacksProvider.backpacks.any((b) => b.state == 1),
                         )
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -412,10 +425,12 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     BuildContext context,
     OrdersProvider ordersProvider,
     AuthProvider auth,
-    bool allEmpty,
-  ) {
+    bool allEmpty, {
+    bool hasPendingBackpack = false,
+  }) {
     final hasError = ordersProvider.errorMessage != null && allEmpty;
     final hasFilter = _activeFilter != DeliveryFilter.all || _searchCtrl.text.isNotEmpty;
+    final showPendingBackpackNotice = !hasError && !hasFilter && allEmpty && hasPendingBackpack;
 
     return ListView(
       children: [
@@ -423,20 +438,41 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         Column(
           children: [
             Icon(
-              hasError ? Icons.cloud_off_outlined : Icons.inbox_outlined,
+              hasError
+                  ? Icons.cloud_off_outlined
+                  : showPendingBackpackNotice
+                      ? Icons.backpack_outlined
+                      : Icons.inbox_outlined,
               size: 64,
-              color: hasError ? Colors.orange : Colors.grey.shade400,
+              color: hasError
+                  ? Colors.orange
+                  : showPendingBackpackNotice
+                      ? Colors.blue
+                      : Colors.grey.shade400,
             ),
             const SizedBox(height: 16),
             Text(
               hasError
                   ? 'No se pudieron cargar las entregas'
-                  : hasFilter
-                      ? 'Sin resultados para el filtro seleccionado'
-                      : 'No hay entregas disponibles',
+                  : showPendingBackpackNotice
+                      ? 'Tienes una mochila asignada pendiente de aceptar'
+                      : hasFilter
+                          ? 'Sin resultados para el filtro seleccionado'
+                          : 'No hay entregas disponibles',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
+            if (showPendingBackpackNotice) ...[
+              const SizedBox(height: 8),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                  'Ve a la pestaña Mochilas y acéptala para ver aquí sus órdenes.',
+                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
             if (ordersProvider.errorMessage != null) ...[
               const SizedBox(height: 8),
               Padding(
