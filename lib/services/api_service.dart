@@ -54,11 +54,15 @@ class ApiService {
     }
   }
 
-  Future<dynamic> post(String url, Map<String, dynamic> body) async {
+  Future<dynamic> post(
+    String url,
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     try {
       final response = await http
           .post(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
-          .timeout(const Duration(seconds: 20));
+          .timeout(timeout);
       return _handleResponse(response);
     } on SocketException catch (e) {
       await _throwNetworkException(e);

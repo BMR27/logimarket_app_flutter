@@ -206,6 +206,14 @@ class OrdersProvider extends ChangeNotifier {
       _orderProductsCache[id] = List<ProductModel>.from(_products);
     } on ApiException catch (e) {
       _errorMessage = e.message;
+      if (e.statusCode == 404) {
+        // La orden ya no existe en el servidor (borrada/depurada) — no dejarla
+        // en caché ni en el listado local para que no se siga mostrando.
+        _selectedOrder = null;
+        _orderDetailCache.remove(id);
+        _orderProductsCache.remove(id);
+        _orders = _orders.where((o) => o.id != id).toList();
+      }
     } catch (e) {
       _errorMessage = 'Error al cargar la orden: $e';
     }

@@ -181,12 +181,18 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
 
     try {
       final svc = ApiService();
-      await svc.post(ApiConfig.orderEvidencia(widget.orderId), {
-        'idUsuario': widget.idUsuario,
-        'nombreReceptor': nombre,
-        if (_fotoBase64 != null) 'fotoBase64': _normalizeBase64(_fotoBase64!),
-        if (firmaBase64 != null) 'firmaBase64': firmaBase64,
-      });
+      await svc.post(
+        ApiConfig.orderEvidencia(widget.orderId),
+        {
+          'idUsuario': widget.idUsuario,
+          'nombreReceptor': nombre,
+          if (_fotoBase64 != null) 'fotoBase64': _normalizeBase64(_fotoBase64!),
+          if (firmaBase64 != null) 'firmaBase64': firmaBase64,
+        },
+        // Subir foto+firma en base64 puede tardar más que una petición normal
+        // en 4G débil; 20s es insuficiente y provoca "El servidor no responde".
+        timeout: const Duration(seconds: 60),
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -197,8 +203,9 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         Navigator.pop(context, true);
       }
     } on ApiException catch (e) {
-      if (e.statusCode == 0) {
-        // Sin conexión — guardar localmente y subir cuando regrese internet
+      if (e.statusCode == 0 || e.statusCode == 408) {
+        // Sin conexión o el servidor no respondió a tiempo (común en 4G débil)
+        // — guardar localmente y subir cuando regrese internet o el servidor responda.
         await LocalDatabase().savePendingEvidence(
           idOrden: widget.orderId,
           idUsuario: widget.idUsuario,
@@ -208,10 +215,14 @@ class _DeliveryEvidenceScreenState extends State<DeliveryEvidenceScreen> {
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión — evidencia guardada. Se subirá al recuperar internet.'),
+            SnackBar(
+              content: Text(
+                e.statusCode == 408
+                    ? 'El servidor tardó en responder — evidencia guardada. Se subirá automáticamente.'
+                    : 'Sin conexión — evidencia guardada. Se subirá al recuperar internet.',
+              ),
               backgroundColor: Colors.orange,
-              duration: Duration(seconds: 4),
+              duration: const Duration(seconds: 4),
             ),
           );
           Navigator.pop(context, true);
