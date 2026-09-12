@@ -596,9 +596,13 @@ class _MapTabState extends State<MapTab> {
 
   Future<LatLng?> _geocodeAddress(String query) async {
     try {
-      // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma)
+      // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma).
+      // Sin Play Services (común en Xiaomi/Huawei/etc.) esta llamada puede
+      // colgarse mucho tiempo sin fallar — con timeout cae rápido al respaldo HTTP.
       try {
-        final locations = await geo.locationFromAddress(query);
+        final locations = await geo
+            .locationFromAddress(query)
+            .timeout(const Duration(seconds: 4));
         if (locations.isNotEmpty) {
           final loc = locations.first;
           if (_isWithinMexico(loc.latitude, loc.longitude)) {

@@ -61,10 +61,28 @@ class AuthProvider extends ChangeNotifier {
       // Recuperar estado de viaje previo desde SharedPreferences.
       // Si el proceso fue reiniciado mientras el viaje estaba activo,
       // esto garantiza que start() recibe enViaje=true en lugar de false.
+      //
+      // OJO: SharedPreferences es por dispositivo, no por sesión. Si otro
+      // mensajero usó este mismo dispositivo antes y no cerró sesión
+      // correctamente (o la app se cerró de golpe), estos valores pueden
+      // pertenecer a SU viaje, no al de este usuario. Solo se restauran si
+      // el idMensajero guardado coincide con el que está iniciando sesión
+      // — de lo contrario se descartan para no heredar un viaje/orden ajeno.
       final prefs = await SharedPreferences.getInstance();
-      final savedEnViaje = prefs.getBool(kPrefsEnViaje) ?? false;
-      final savedIdOrden = prefs.getInt(kPrefsIdOrden);
-      final savedFolioOrden = prefs.getString(kPrefsFolioOrden);
+      final savedMensajero = prefs.getInt(kPrefsMensajero);
+      final belongsToThisUser = savedMensajero == user.idUsuario;
+      final savedEnViaje = belongsToThisUser ? (prefs.getBool(kPrefsEnViaje) ?? false) : false;
+      final savedIdOrden = belongsToThisUser ? prefs.getInt(kPrefsIdOrden) : null;
+      final savedFolioOrden = belongsToThisUser ? prefs.getString(kPrefsFolioOrden) : null;
+      if (!belongsToThisUser && savedMensajero != null) {
+        debugPrint(
+          '[Auth] descartando viaje guardado del mensajero $savedMensajero '
+          '(dispositivo compartido) — no pertenece a ${user.idUsuario}',
+        );
+        await prefs.remove(kPrefsIdOrden);
+        await prefs.remove(kPrefsFolioOrden);
+        await prefs.remove(kPrefsEnViaje);
+      }
       await LocationTrackingService.instance.start(
         idMensajero: user.idUsuario,
         token: token,

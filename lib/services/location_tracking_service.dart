@@ -133,11 +133,11 @@ class LocationTrackingService {
       enViaje:     enViaje,
     );
 
-    // Solicitar exención de optimización de batería para que Android
-    // no mate el foreground service (crítico en Samsung, Xiaomi, Huawei, etc.)
-    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-    }
+    // Solicitar exención de optimización de batería para que Android no mate
+    // el foreground service (crítico en Samsung, Xiaomi, Huawei, etc.). Esto
+    // puede mostrar un diálogo del sistema que el usuario tarda en atender —
+    // no se espera aquí para no bloquear la confirmación de "viaje iniciado".
+    unawaited(_requestBatteryOptimizationExemption());
 
     await FlutterForegroundTask.startService(
       notificationTitle: 'Logimarket activo',
@@ -150,6 +150,16 @@ class LocationTrackingService {
 
     // Ping inmediato para aparecer en Gestión de Ruta sin esperar el primer tick (10s).
     unawaited(_sendImmediatePing(idMensajero: idMensajero, token: token));
+  }
+
+  Future<void> _requestBatteryOptimizationExemption() async {
+    try {
+      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+    } catch (e) {
+      debugPrint('[LocationTracking] battery optimization request error: $e');
+    }
   }
 
   /// Envía un ping de ubicación de inmediato en el hilo principal.
