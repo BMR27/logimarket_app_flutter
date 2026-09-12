@@ -128,9 +128,16 @@ class OrdersProvider extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      _orders = await _service.getOrders(equipos: equipos, folio: folio);
+      // Ambas peticiones son independientes — lanzarlas en paralelo evita sumar
+      // sus tiempos de espera (antes se esperaba una y luego la otra).
+      final ordersFuture = _service.getOrders(equipos: equipos, folio: folio);
+      final mapOrdersFuture = _service
+          .getOrdersForMap(equipos: equipos, folio: folio)
+          .catchError((_) => <OrderModel>[]);
+
+      _orders = await ordersFuture;
       try {
-        final mapOrders = await _service.getOrdersForMap(equipos: equipos, folio: folio);
+        final mapOrders = await mapOrdersFuture;
         final byId = <int, OrderModel>{for (final o in mapOrders) o.id: o};
         _orders = _orders.map((o) {
           final mo = byId[o.id];

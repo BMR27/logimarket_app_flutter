@@ -736,8 +736,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         backgroundColor: ok ? Colors.green : Colors.orange,
       ));
       if (ok) {
-        await context.read<OrdersProvider>().loadOrders(auth.equiposForQuery);
-
         final backpacksProvider = context.read<BackpacksProvider>();
         final enRuta = backpacksProvider.backpacks.where((b) => b.state == 2).toList();
         final primaryBackpack = enRuta.isNotEmpty
@@ -745,13 +743,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
         final userType = auth.user?.type.toLowerCase() ?? '';
         final isAdmin = userType.contains('admin') || userType.contains('lider');
-        await backpacksProvider.loadMapItems(
-          isAdmin: isAdmin,
-          userId: auth.user!.idUsuario,
-          idBackpack: primaryBackpack?.id,
-          idRepartidor: primaryBackpack?.idRepartidor,
-          idBackpackIds: enRuta.map((b) => b.id).toList(),
-        );
+
+        // Estas dos recargas son independientes entre sí (una lee de OrdersProvider,
+        // la otra de BackpacksProvider ya cargado) — lanzarlas en paralelo evita
+        // duplicar el tiempo de espera que percibía el mensajero tras guardar.
+        await Future.wait([
+          context.read<OrdersProvider>().loadOrders(auth.equiposForQuery),
+          backpacksProvider.loadMapItems(
+            isAdmin: isAdmin,
+            userId: auth.user!.idUsuario,
+            idBackpack: primaryBackpack?.id,
+            idRepartidor: primaryBackpack?.idRepartidor,
+            idBackpackIds: enRuta.map((b) => b.id).toList(),
+          ),
+        ]);
 
         if (mounted) Navigator.pop(context);
       }
