@@ -37,6 +37,10 @@ class BackpackItemModel {
 
   bool get isValidated => validation == 1;
 
+  static const _managedStatuses = {1, 4, 5, 6};
+
+  bool get isManaged => isValidated && _managedStatuses.contains(idStatusOrden);
+
   String get fullAddress {
     final parts = [
       if (calle != null && calle!.isNotEmpty) '${calle!} ${numExterior ?? ''}'.trim(),

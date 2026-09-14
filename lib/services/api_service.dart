@@ -10,10 +10,28 @@ class ApiService {
   static const _storage = FlutterSecureStorage();
   static const String _tokenKey = 'jwt_token';
 
-  static Future<String?> getToken() => _storage.read(key: _tokenKey);
+  static Future<String?> getToken() => safeSecureRead(_storage, _tokenKey);
   static Future<void> saveToken(String token) =>
       _storage.write(key: _tokenKey, value: token);
   static Future<void> deleteToken() => _storage.delete(key: _tokenKey);
+
+  /// Lee una clave del secure storage tolerando que la clave de cifrado del
+  /// Android Keystore haya quedado invalidada (ej. tras reinstalar la app o
+  /// restaurar un backup en otro dispositivo). En ese caso el valor cifrado
+  /// es irrecuperable (BadPaddingException) — se descarta en vez de tronar
+  /// el login, y se elimina para que no vuelva a fallar en el próximo intento.
+  static Future<String?> safeSecureRead(FlutterSecureStorage storage, String key) async {
+    try {
+      return await storage.read(key: key);
+    } catch (_) {
+      try {
+        await storage.delete(key: key);
+      } catch (_) {
+        // Si tampoco se puede borrar, se ignora: el próximo write la sobrescribe.
+      }
+      return null;
+    }
+  }
 
   Future<Map<String, String>> _headers() async {
     final token = await getToken();

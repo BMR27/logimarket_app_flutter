@@ -38,7 +38,7 @@ class AuthService extends ApiService {
   }
 
   Future<String> _getOrCreateDeviceId() async {
-    final existing = await _storage.read(key: _deviceIdKey);
+    final existing = await ApiService.safeSecureRead(_storage, _deviceIdKey);
     if (existing != null && existing.trim().isNotEmpty) {
       return existing.trim();
     }
@@ -71,7 +71,7 @@ class AuthService extends ApiService {
 
   /// Restaura el usuario: primero desde storage, luego desde el JWT como fallback.
   Future<UserModel?> getSavedUser() async {
-    final raw = await _storage.read(key: _userKey);
+    final raw = await ApiService.safeSecureRead(_storage, _userKey);
     if (raw != null) {
       return UserModel.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     }

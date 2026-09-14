@@ -111,26 +111,46 @@ class _MainScreenState extends State<MainScreen> {
     final backpacksProvider = context.read<BackpacksProvider>();
 
     await auth.ensureEquiposLoaded();
-    await ordersProvider.loadOrders(auth.equiposForQuery);
-    if (auth.user != null) {
-      await backpacksProvider.loadBackpacks(auth.user!.idUsuario);
-      final isAdmin = _isAdminOrLeader(auth);
-      final activeBackpacks = backpacksProvider.backpacks
-          .where((b) => _isActiveBackpackState(b.state))
-          .toList();
-      final primaryBackpack = activeBackpacks.isNotEmpty
-          ? activeBackpacks.first
-          : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
-      if (!isAdmin) {
-        await backpacksProvider.loadMapItems(
-          isAdmin: isAdmin,
-          userId: auth.user!.idUsuario,
-          idBackpack: primaryBackpack?.id,
-          idRepartidor: primaryBackpack?.idRepartidor,
-          idBackpackIds: activeBackpacks.map((b) => b.id).toList(),
-        );
-      }
+    final isAdmin = _isAdminOrLeader(auth);
+
+    if (isAdmin) {
+      await ordersProvider.loadOrders(auth.equiposForQuery);
+      return;
     }
+
+    if (auth.user == null) return;
+
+    await backpacksProvider.loadBackpacks(auth.user!.idUsuario);
+    final activeBackpacks = backpacksProvider.backpacks
+        .where((b) => _isActiveBackpackState(b.state))
+        .toList();
+    final primaryBackpack = activeBackpacks.isNotEmpty
+        ? activeBackpacks.first
+        : (backpacksProvider.backpacks.isNotEmpty ? backpacksProvider.backpacks.first : null);
+
+    await backpacksProvider.loadMapItems(
+      isAdmin: false,
+      userId: auth.user!.idUsuario,
+      idBackpack: primaryBackpack?.id,
+      idRepartidor: primaryBackpack?.idRepartidor,
+      idBackpackIds: activeBackpacks.map((b) => b.id).toList(),
+    );
+
+    // Sin mochila activa: no cargar todas las órdenes del equipo, solo las
+    // propias del mensajero (ninguna en este caso), igual que en _reloadOrders.
+    if (activeBackpacks.isEmpty) {
+      await ordersProvider.loadOrdersByIds(auth.equiposForQuery, const <int>[]);
+      return;
+    }
+
+    final activeBackpackIds = activeBackpacks.map((b) => b.id).toSet();
+    final activeOrderIds = backpacksProvider.selectedItems
+        .where((i) => activeBackpackIds.contains(i.idBackpack))
+        .map((i) => i.idOrdenVenta)
+        .where((id) => id > 0)
+        .toSet()
+        .toList();
+    await ordersProvider.loadOrdersByIds(auth.equiposForQuery, activeOrderIds);
   }
 
   Future<void> _reloadOrders() async {

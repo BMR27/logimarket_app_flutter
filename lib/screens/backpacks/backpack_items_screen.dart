@@ -211,7 +211,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
             .toList();
     final canViewOrderInfo = widget.isAdmin || _currentBackpackState != 1;
 
-    final allValidated = items.isNotEmpty && items.every((i) => i.isValidated);
+    final allManaged = items.isNotEmpty && items.every((i) => i.isManaged);
 
     return Scaffold(
       appBar: AppBar(
@@ -378,7 +378,7 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
                   _ActionButtons(
                     backpackId: widget.backpackId,
                     backpackState: _currentBackpackState,
-                    allValidated: allValidated,
+                    allManaged: allManaged,
                     provider: provider,
                     onStateUpdated: (newState) {
                       setState(() => _currentBackpackState = newState);
@@ -393,13 +393,13 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
 class _ActionButtons extends StatefulWidget {
   final int backpackId;
   final int backpackState;
-  final bool allValidated;
+  final bool allManaged;
   final BackpacksProvider provider;
   final ValueChanged<int>? onStateUpdated;
   const _ActionButtons({
     required this.backpackId,
     required this.backpackState,
-    required this.allValidated,
+    required this.allManaged,
     required this.provider,
     this.onStateUpdated,
   });
@@ -413,21 +413,40 @@ class _ActionButtonsState extends State<_ActionButtons> {
 
   Future<void> _changeState(int newState) async {
     final label = newState == 2 ? 'aceptar' : 'finalizar';
-    final pendientes = newState == 3
-        ? widget.provider.selectedItems.where((i) => !i.isValidated).length
-        : 0;
+
+    if (newState == 3) {
+      final pendientes =
+          widget.provider.selectedItems.where((i) => !i.isManaged).length;
+      if (pendientes > 0) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Mochila incompleta'),
+            content: Text(
+              'No puedes finalizar la mochila: $pendientes orden(es) aún no '
+              'han sido gestionadas.\n\n'
+              'Cada orden debe estar validada (escaneada) y tener un estatus '
+              'registrado (Exitosa, Cancelada, Intento 1 o Intento 2) antes '
+              'de poder cerrar la mochila.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Entendido')),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(newState == 2 ? 'Aceptar mochila' : 'Finalizar mochila'),
-        content: newState == 3 && pendientes > 0
-            ? Text(
-                '¿Confirmas que finalizas la mochila?\n\n'
-                'Nota: $pendientes orden(es) aún no han sido validada(s), pero puedes finalizar de todas formas.',
-              )
-            : Text(newState == 2
-                ? '¿Confirmas que aceptas esta mochila y empiezas la ruta?'
-                : '¿Confirmas que todas las entregas han sido realizadas?'),
+        content: Text(newState == 2
+            ? '¿Confirmas que aceptas esta mochila y empiezas la ruta?'
+            : '¿Confirmas que todas las entregas han sido realizadas?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -503,12 +522,12 @@ class _ActionButtonsState extends State<_ActionButtons> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: FilledButton.icon(
             icon: const Icon(Icons.flag),
-            label: Text(widget.allValidated
+            label: Text(widget.allManaged
                 ? 'Finalizar mochila'
-                : 'Finalizar mochila (${widget.provider.selectedItems.where((i) => i.isValidated).length}/${widget.provider.selectedItems.length} validadas)'),
+                : 'Finalizar mochila (${widget.provider.selectedItems.where((i) => i.isManaged).length}/${widget.provider.selectedItems.length} gestionadas)'),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(48),
-              backgroundColor: widget.allValidated ? Colors.green : Colors.orange,
+              backgroundColor: widget.allManaged ? Colors.green : Colors.orange,
             ),
             onPressed: () => _changeState(3),
           ),
