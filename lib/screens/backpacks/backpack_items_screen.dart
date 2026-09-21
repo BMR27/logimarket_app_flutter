@@ -196,6 +196,23 @@ class _BackpackItemsScreenState extends State<BackpackItemsScreen> {
         ),
       ),
     );
+
+    // Tras validar, llevar directo al detalle de la orden recién escaneada
+    // (mismo patrón de navegación que _ItemTile.onTap).
+    final validatedItem = provider.selectedItems.cast<BackpackItemModel?>().firstWhere(
+          (i) => i?.folioOrden.trim() == scannedFolio,
+          orElse: () => null,
+        );
+    if (validatedItem == null || !mounted) return;
+
+    final auth = context.read<AuthProvider>();
+    unawaited(
+      context.read<OrdersProvider>().preloadOrder(validatedItem.idOrdenVenta, auth.equiposForQuery),
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: validatedItem.idOrdenVenta)),
+    );
   }
 
   @override

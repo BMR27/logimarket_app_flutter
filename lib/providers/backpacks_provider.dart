@@ -293,13 +293,12 @@ class BackpacksProvider extends ChangeNotifier {
 
   void _markItemValidatedLocally({int? idItem, int? idBackpack, String? folio}) {
     final normalizedFolio = folio?.trim();
-    final idx = _selectedItems.indexWhere((i) {
+    bool matches(BackpackItemModel i) {
       if (idItem != null) return i.idBackpackItem == idItem;
       return i.idBackpack == idBackpack && i.folioOrden.trim() == normalizedFolio;
-    });
-    if (idx < 0) return;
-    final item = _selectedItems[idx];
-    _selectedItems[idx] = BackpackItemModel.fromJson({
+    }
+
+    BackpackItemModel validated(BackpackItemModel item) => BackpackItemModel.fromJson({
       'IdBackpack': item.idBackpack,
       'IdBackPackItem': item.idBackpackItem,
       'IdOrdenVenta': item.idOrdenVenta,
@@ -309,6 +308,23 @@ class BackpacksProvider extends ChangeNotifier {
       'NombreCliente': item.nombreCliente,
       'Validation': 1,
     });
+
+    final idx = _selectedItems.indexWhere(matches);
+    if (idx >= 0) {
+      _selectedItems[idx] = validated(_selectedItems[idx]);
+    }
+
+    // También hay que actualizar el caché en memoria (_itemsByBackpack): si no se
+    // toca aquí, la próxima vez que se entre a esta mochila loadBackpackItems()
+    // sirve la copia vieja sin validar desde el caché y "revierte" el estatus.
+    final cacheBackpackId = idBackpack ?? (idx >= 0 ? _selectedItems[idx].idBackpack : null);
+    final cachedList = cacheBackpackId != null ? _itemsByBackpack[cacheBackpackId] : null;
+    if (cachedList != null) {
+      final cacheIdx = cachedList.indexWhere(matches);
+      if (cacheIdx >= 0) {
+        cachedList[cacheIdx] = validated(cachedList[cacheIdx]);
+      }
+    }
   }
 
   Future<bool> validateItem(int idItem) async {
