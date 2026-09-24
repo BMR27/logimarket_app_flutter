@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,7 @@ import '../../providers/orders_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/map_navigation_provider.dart';
 import '../../providers/backpacks_provider.dart';
+import '../../providers/mensajes_provider.dart';
 import '../../db/local_database.dart';
 import '../../config/api_config.dart';
 import '../../models/catalogs_model.dart';
@@ -147,6 +149,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         _loadPriceRequest(),
         _loadEvidencia(),
         _loadStatusHistory(),
+        context.read<MensajesProvider>().cargarMensajes(widget.orderId),
       ];
 
       if (_motivos.isEmpty) {
@@ -897,6 +900,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  Future<void> _openCoords(String lat, String lng) async {
+    final uri = Uri.parse('https://www.google.com/maps?q=$lat,$lng');
+    if (await canLaunchUrl(uri)) {
+      launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   Future<void> _openGoogleMaps(String? lat, String? lng, String address) async {
     Uri uri;
     if (lat != null && lng != null &&
@@ -1016,17 +1026,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             // ── Cliente ─────────────────────────────────────────────
             _Section(title: 'Cliente', children: [
               _InfoRow(icon: Icons.person, label: order.cliente),
-              _InfoRow(
+              _CollapsibleTextSection(
                 icon: Icons.location_on,
-                label: order.fullAddress,
-                onTap: _enViaje
-                    ? () => _showNavigationOptions(
-                          order.latitud,
-                          order.longitud,
-                          order.fullAddress,
-                        )
-                    : null,
+                title: 'Dirección',
+                text: order.fullAddress,
+                onOpenCoords: _openCoords,
               ),
+              if (_enViaje)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.directions, size: 18),
+                    label: const Text('Cómo llegar'),
+                    onPressed: () => _showNavigationOptions(
+                      order.latitud,
+                      order.longitud,
+                      order.fullAddress,
+                    ),
+                  ),
+                ),
               // ── Botón Iniciar / Finalizar Viaje ─────────────────
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -1078,7 +1096,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ),
                 ),
               if (order.notas.isNotEmpty)
-                _InfoRow(icon: Icons.notes, label: order.notas),
+                _CollapsibleTextSection(
+                  icon: Icons.notes,
+                  title: 'Notas',
+                  text: order.notas,
+                  onOpenCoords: _openCoords,
+                ),
             ]),
 
             // ── Distancia / Tiempo ───────────────────────────────────
@@ -1471,6 +1494,57 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 }),
               ],
             ]),
+            _Section(title: 'Mensajes WhatsApp', children: [
+              Consumer<MensajesProvider>(
+                builder: (context, mensajesProvider, _) {
+                  if (mensajesProvider.loading && mensajesProvider.mensajes.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: LinearProgressIndicator(),
+                    );
+                  }
+                  if (mensajesProvider.mensajes.isEmpty) {
+                    return const Text('Aún no hay mensajes de WhatsApp para esta orden.');
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: mensajesProvider.mensajes.map((m) {
+                      return Align(
+                        alignment: m.esSaliente ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.all(10),
+                          constraints: const BoxConstraints(maxWidth: 320),
+                          decoration: BoxDecoration(
+                            color: m.esSaliente
+                                ? Colors.blue.withOpacity(0.12)
+                                : Colors.grey.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (m.tipoEvento != null)
+                                Text(
+                                  m.tipoEvento == 'encuesta_satisfaccion'
+                                      ? 'Encuesta de satisfacción'
+                                      : 'Aviso de entrega',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              Text(m.cuerpo ?? (m.templateSid != null ? 'Plantilla enviada' : '-')),
+                              Text(
+                                '${m.createdAt.toLocal()}'.substring(0, 16),
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+            ]),
           ],
         ),
       ),
@@ -1511,6 +1585,75 @@ class _Section extends StatelessWidget {
         const SizedBox(height: 16),
       ],
     );
+  }
+}
+
+final _coordsRegex = RegExp(r'(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)');
+
+class _CollapsibleTextSection extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+  final void Function(String lat, String lng)? onOpenCoords;
+  const _CollapsibleTextSection({
+    required this.icon,
+    required this.title,
+    required this.text,
+    this.onOpenCoords,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 4),
+        leading: Icon(icon, size: 18, color: Colors.grey),
+        title: Text(title, style: const TextStyle(fontSize: 13)),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _TextWithMapLinks(text: text, onOpenCoords: onOpenCoords),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TextWithMapLinks extends StatelessWidget {
+  final String text;
+  final void Function(String lat, String lng)? onOpenCoords;
+  const _TextWithMapLinks({required this.text, this.onOpenCoords});
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = _coordsRegex.allMatches(text).toList();
+    if (matches.isEmpty || onOpenCoords == null) {
+      return Text(text, style: const TextStyle(fontSize: 13));
+    }
+
+    final spans = <InlineSpan>[];
+    var lastEnd = 0;
+    for (final match in matches) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
+      }
+      final lat = match.group(1)!;
+      final lng = match.group(2)!;
+      spans.add(TextSpan(
+        text: match.group(0),
+        style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
+        recognizer: TapGestureRecognizer()..onTap = () => onOpenCoords!(lat, lng),
+      ));
+      lastEnd = match.end;
+    }
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd)));
+    }
+
+    return RichText(text: TextSpan(style: const TextStyle(fontSize: 13, color: Colors.black87), children: spans));
   }
 }
 
