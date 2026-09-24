@@ -40,6 +40,11 @@ class BackpacksProvider extends ChangeNotifier {
       _backpacks = fetched.where((b) => b.state != 4).toList();
       // Persist for offline access
       await LocalDatabase().saveBackpacks(idUsuario, _backpacks);
+      // Purga el caché de ítems de cualquier mochila que ya cerró: si un fallback offline
+      // llegara a referenciar su id más adelante, no debe poder resucitar órdenes ya resueltas.
+      for (final b in fetched.where((b) => b.state == 4)) {
+        await LocalDatabase().deleteBackpackItems(b.id);
+      }
     } on ApiException catch (e) {
       if (e.statusCode == 0) {
         // Red no disponible — cargar desde caché local

@@ -315,6 +315,15 @@ class LocalDatabase {
         .toList();
   }
 
+  /// Borra el caché de ítems de una mochila que ya no está activa (cerrada/cancelada),
+  /// para que un fallback offline nunca pueda resucitar órdenes ya resueltas — se llama
+  /// desde loadBackpacks() en cuanto el servidor confirma que una mochila pasó a State=4.
+  Future<void> deleteBackpackItems(int idBackpack) async {
+    final database = await db;
+    await database.delete('backpack_items_cache',
+        where: 'idBackpack = ?', whereArgs: [idBackpack]);
+  }
+
   // ─── Caché de lista de mochilas ─────────────────────────────────────────────
 
   Future<void> saveBackpacks(int idUsuario, List<BackpackModel> backpacks) async {
