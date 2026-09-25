@@ -1,7 +1,7 @@
 name: logimarket_app
 description: "Logimarket Delivery App - Flutter (Android + iOS)"
 publish_to: 'none'
-version: 2.1.7+22
+version: 2.1.7+26
 
 environment:
   sdk: ^3.11.5
@@ -39,6 +39,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.4
+  sqflite_common_ffi: ^2.3.3
 
 flutter_launcher_icons:
   android: true
