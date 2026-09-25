@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/backpack_item_model.dart';
@@ -13,6 +14,21 @@ class LocalDatabase {
   static Future<Database> get db async {
     _db ??= await _initDb();
     return _db!;
+  }
+
+  /// Ejecuta una escritura de caché local "best effort": si el disco/DB falla
+  /// (ej. quedó en solo-lectura, sin espacio, archivo corrupto), la registra
+  /// y sigue sin propagar la excepción. Antes, una sola escritura fallida acá
+  /// se quedaba sin capturar y el `_loading`/`_loadingItems` del provider que
+  /// la llamaba nunca volvía a `false` — la pantalla se quedaba cargando para
+  /// siempre. La caché local es solo respaldo offline, nunca debe poder
+  /// tumbar una pantalla que ya tiene datos frescos del servidor.
+  Future<void> _safeWrite(String label, Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('[LocalDatabase] escritura de caché falló ($label): $e');
+    }
   }
 
   static Future<Database> _initDb() async {
@@ -197,6 +213,7 @@ class LocalDatabase {
   // ─── Órdenes ────────────────────────────────────────────────────────────────
 
   Future<void> upsertOrder(OrderModel order) async {
+    await _safeWrite('upsertOrder', () async {
     final database = await db;
     await database.insert(
       'ordenes',
@@ -235,6 +252,7 @@ class LocalDatabase {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    });
   }
 
   Future<void> markOrderAsEdited({
@@ -247,23 +265,25 @@ class LocalDatabase {
     String? latitud,
     String? longitud,
   }) async {
-    final database = await db;
-    await database.update(
-      'ordenes',
-      {
-        'editado': 'true',
-        'bd_status': status.toString(),
-        'bd_idStatusMotivo': motivoStatus.toString(),
-        'bd_explicacionMotivo': explicacionMotivo.toString(),
-        'bd_idUsuario': idUsuario.toString(),
-        'bd_fechaModificacion': DateTime.now().toIso8601String(),
-        'bd_fechaReagenda': fechaReagenda,
-        'bd_latitud': latitud,
-        'bd_longitud': longitud,
-      },
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await _safeWrite('markOrderAsEdited', () async {
+      final database = await db;
+      await database.update(
+        'ordenes',
+        {
+          'editado': 'true',
+          'bd_status': status.toString(),
+          'bd_idStatusMotivo': motivoStatus.toString(),
+          'bd_explicacionMotivo': explicacionMotivo.toString(),
+          'bd_idUsuario': idUsuario.toString(),
+          'bd_fechaModificacion': DateTime.now().toIso8601String(),
+          'bd_fechaReagenda': fechaReagenda,
+          'bd_latitud': latitud,
+          'bd_longitud': longitud,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
   }
 
   Future<List<Map<String, dynamic>>> getEditedOrders() async {
@@ -271,9 +291,15 @@ class LocalDatabase {
     return database.query('ordenes', where: "editado = 'true'");
   }
 
-  Future<void> clearEditedOrders() async {
-    final database = await db;
-    await database.update('ordenes', {'editado': 'false'}, where: "editado = 'true'");
+  /// Limpia el flag de "editado offline" de UNA sola orden tras sincronizarla
+  /// con éxito — nunca de todas a la vez, para no descartar ediciones
+  /// pendientes de otras órdenes que aún no se han podido subir al servidor.
+  Future<void> clearEditedOrder(int id) async {
+    await _safeWrite('clearEditedOrder', () async {
+      final database = await db;
+      await database.update('ordenes', {'editado': 'false'},
+          where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   Future<List<Map<String, dynamic>>> getAllOrders() async {
@@ -282,26 +308,44 @@ class LocalDatabase {
     return database.query('ordenes', where: 'idStatus IN (2, 5, 6, 7)');
   }
 
+  /// Elimina de la caché local las órdenes que ya no están en [ids], para que
+  /// no reaparezcan órdenes viejas (reasignadas o completadas) cuando se cae
+  /// a la caché local por un error de red.
+  Future<void> pruneOrdersNotIn(List<int> ids) async {
+    if (ids.isEmpty) return;
+    await _safeWrite('pruneOrdersNotIn', () async {
+      final database = await db;
+      final placeholders = List.filled(ids.length, '?').join(',');
+      await database.delete(
+        'ordenes',
+        where: 'id NOT IN ($placeholders)',
+        whereArgs: ids,
+      );
+    });
+  }
+
   // ─── Caché de ítems de mochila ────────────────────────────────────────────
 
   Future<void> saveBackpackItems(
       int idBackpack, List<BackpackItemModel> items) async {
-    final database = await db;
-    final batch = database.batch();
-    batch.delete('backpack_items_cache',
-        where: 'idBackpack = ?', whereArgs: [idBackpack]);
-    for (final item in items) {
-      batch.insert(
-        'backpack_items_cache',
-        {
-          'idBackpack': idBackpack,
-          'idBackpackItem': item.idBackpackItem,
-          'json': jsonEncode(item.toJson()),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await batch.commit(noResult: true);
+    await _safeWrite('saveBackpackItems', () async {
+      final database = await db;
+      final batch = database.batch();
+      batch.delete('backpack_items_cache',
+          where: 'idBackpack = ?', whereArgs: [idBackpack]);
+      for (final item in items) {
+        batch.insert(
+          'backpack_items_cache',
+          {
+            'idBackpack': idBackpack,
+            'idBackpackItem': item.idBackpackItem,
+            'json': jsonEncode(item.toJson()),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   Future<List<BackpackItemModel>> getBackpackItems(int idBackpack) async {
@@ -319,30 +363,34 @@ class LocalDatabase {
   /// para que un fallback offline nunca pueda resucitar órdenes ya resueltas — se llama
   /// desde loadBackpacks() en cuanto el servidor confirma que una mochila pasó a State=4.
   Future<void> deleteBackpackItems(int idBackpack) async {
-    final database = await db;
-    await database.delete('backpack_items_cache',
-        where: 'idBackpack = ?', whereArgs: [idBackpack]);
+    await _safeWrite('deleteBackpackItems', () async {
+      final database = await db;
+      await database.delete('backpack_items_cache',
+          where: 'idBackpack = ?', whereArgs: [idBackpack]);
+    });
   }
 
   // ─── Caché de lista de mochilas ─────────────────────────────────────────────
 
   Future<void> saveBackpacks(int idUsuario, List<BackpackModel> backpacks) async {
-    final database = await db;
-    final batch = database.batch();
-    batch.delete('backpacks_cache',
-        where: 'idUsuario = ?', whereArgs: [idUsuario]);
-    for (final b in backpacks) {
-      batch.insert(
-        'backpacks_cache',
-        {
-          'idUsuario': idUsuario,
-          'idBackpack': b.id,
-          'json': jsonEncode(b.toJson()),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await batch.commit(noResult: true);
+    await _safeWrite('saveBackpacks', () async {
+      final database = await db;
+      final batch = database.batch();
+      batch.delete('backpacks_cache',
+          where: 'idUsuario = ?', whereArgs: [idUsuario]);
+      for (final b in backpacks) {
+        batch.insert(
+          'backpacks_cache',
+          {
+            'idUsuario': idUsuario,
+            'idBackpack': b.id,
+            'json': jsonEncode(b.toJson()),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   Future<List<BackpackModel>> getCachedBackpacks(int idUsuario) async {

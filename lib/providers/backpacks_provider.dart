@@ -61,18 +61,27 @@ class BackpacksProvider extends ChangeNotifier {
           _errorMessage = e.message;
         }
       }
+    } catch (e) {
+      // Red de seguridad: cualquier error no previsto (parseo, etc.) no debe
+      // dejar el spinner de carga pegado para siempre.
+      _errorMessage = 'Error inesperado al cargar mochilas.';
+    } finally {
+      _loadingBackpacks = false;
+      notifyListeners();
     }
-    _loadingBackpacks = false;
-    notifyListeners();
   }
 
   Future<void> loadBackpackItems(int idBackpack) async {
+    // Antes, si ya había caché en memoria para esta mochila se servía esa
+    // copia PARA SIEMPRE y nunca se volvía a consultar el servidor durante
+    // la sesión — por eso el estatus (validado/exitosa/cancelada) se quedaba
+    // "pegado" hasta forzar el cierre de la app. Ahora el caché solo se usa
+    // para mostrar algo de inmediato mientras se refresca contra el servidor.
     final cached = _itemsByBackpack[idBackpack];
     if (cached != null && cached.isNotEmpty) {
       _selectedBackpackId = idBackpack;
       _selectedItems = List<BackpackItemModel>.from(cached);
       notifyListeners();
-      return;
     }
 
     _loadingItems = true;
@@ -87,22 +96,27 @@ class BackpacksProvider extends ChangeNotifier {
       await LocalDatabase().saveBackpackItems(idBackpack, fetched);
     } on ApiException catch (e) {
       if (e.statusCode == 0) {
-        // Red no disponible — cargar desde caché local
-        final sqlCached = await LocalDatabase().getBackpackItems(idBackpack);
-        if (sqlCached.isNotEmpty) {
-          _selectedBackpackId = idBackpack;
-          _selectedItems = sqlCached;
-          _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(sqlCached);
-          _errorMessage = 'Sin conexión — mostrando datos guardados.';
-        } else {
-          _errorMessage = 'Sin conexión y sin datos guardados para esta mochila.';
+        // Red no disponible — si no había ya algo mostrado, caer a caché local
+        if (cached == null || cached.isEmpty) {
+          final sqlCached = await LocalDatabase().getBackpackItems(idBackpack);
+          if (sqlCached.isNotEmpty) {
+            _selectedBackpackId = idBackpack;
+            _selectedItems = sqlCached;
+            _itemsByBackpack[idBackpack] = List<BackpackItemModel>.from(sqlCached);
+          }
         }
+        _errorMessage = (_selectedItems.isNotEmpty)
+            ? 'Sin conexión — mostrando datos guardados.'
+            : 'Sin conexión y sin datos guardados para esta mochila.';
       } else {
         _errorMessage = e.message;
       }
+    } catch (e) {
+      _errorMessage = 'Error inesperado al cargar la mochila.';
+    } finally {
+      _loadingItems = false;
+      notifyListeners();
     }
-    _loadingItems = false;
-    notifyListeners();
   }
 
   Future<void> prefetchBackpackItems(int idBackpack) async {
@@ -125,9 +139,12 @@ class BackpacksProvider extends ChangeNotifier {
       _selectedItems = await _service.getBackpackItemsDeliver(idRepartidor);
     } on ApiException catch (e) {
       _errorMessage = e.message;
+    } catch (e) {
+      _errorMessage = 'Error inesperado al cargar entregas.';
+    } finally {
+      _loadingItems = false;
+      notifyListeners();
     }
-    _loadingItems = false;
-    notifyListeners();
   }
 
   Future<void> loadMapItems({
@@ -164,6 +181,11 @@ class BackpacksProvider extends ChangeNotifier {
         }
         for (final entry in byBackpack.entries) {
           await LocalDatabase().saveBackpackItems(entry.key, entry.value);
+          // Mantiene también sincronizado el caché en memoria que usa
+          // loadBackpackItems/prefetchBackpackItems — si no, la pestaña
+          // "Mochilas" podía seguir mostrando el estatus viejo (ej. "validado")
+          // aunque el mapa ya reflejara la entrega recién marcada Exitosa/Cancelada.
+          _itemsByBackpack[entry.key] = List<BackpackItemModel>.from(entry.value);
         }
         return;
       }

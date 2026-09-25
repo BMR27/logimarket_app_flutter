@@ -6,6 +6,34 @@ import '../services/api_service.dart';
 import '../config/api_config.dart';
 import '../db/local_database.dart';
 
+/// Corre [work] sobre [items] en paralelo, pero nunca más de [maxConcurrent]
+/// a la vez. Con mensajeros que llegan a tener 50-60+ órdenes asignadas,
+/// lanzar TODAS las peticiones de golpe (Future.wait sin límite) puede saturar
+/// el pool de conexiones del dispositivo y golpear al backend con un pico de
+/// peticiones simultáneas — esto reparte la carga en oleadas controladas sin
+/// volver a la lentitud de hacerlas una por una.
+Future<List<R>> _mapWithConcurrency<T, R>(
+  List<T> items,
+  int maxConcurrent,
+  Future<R> Function(T item) work,
+) async {
+  final results = List<R?>.filled(items.length, null);
+  var nextIndex = 0;
+
+  Future<void> runWorker() async {
+    while (true) {
+      final i = nextIndex;
+      if (i >= items.length) return;
+      nextIndex++;
+      results[i] = await work(items[i]);
+    }
+  }
+
+  final workerCount = maxConcurrent < items.length ? maxConcurrent : items.length;
+  await Future.wait(List.generate(workerCount, (_) => runWorker()));
+  return results.cast<R>();
+}
+
 class OrdersProvider extends ChangeNotifier {
   final _service = OrdersService();
   final _localDb = LocalDatabase();
@@ -54,81 +82,119 @@ class OrdersProvider extends ChangeNotifier {
 
     final uniqueIds = orderIds.toSet().where((id) => id > 0).toList()..sort();
     if (uniqueIds.isEmpty) {
-      // Puede ser que los backpacks también fallaron offline — intentar caché local
-      final cached = await _localDb.getAllOrders();
-      if (cached.isNotEmpty) {
-        _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
-        _offline = true;
-        _errorMessage = 'Sin conexión — mostrando datos guardados localmente.';
-      } else {
-        _orders = [];
-        _offline = false;
+      try {
+        // Puede ser que los backpacks también fallaron offline — intentar caché local
+        final cached = await _localDb.getAllOrders();
+        if (cached.isNotEmpty) {
+          _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
+          _offline = true;
+          _errorMessage = 'Sin conexión — mostrando datos guardados localmente.';
+        } else {
+          _orders = [];
+          _offline = false;
+        }
+      } finally {
+        _loading = false;
+        notifyListeners();
       }
-      _loading = false;
-      notifyListeners();
       return;
     }
 
     bool hadNetworkError = false;
     bool hadAuthError = false;
-    final loaded = <OrderModel>[];
+    var failedCount = 0;
 
-    for (final id in uniqueIds) {
-      try {
-        final order = await _service.getOrderDetail(id, equipos: equipos);
-        loaded.add(order);
-      } on ApiException catch (e) {
-        if (e.statusCode == 0) hadNetworkError = true;
-        if (e.statusCode == 401 || e.statusCode == 403) hadAuthError = true;
-      } catch (_) {
-        // Continúa para no perder las órdenes que sí se puedan cargar.
-      }
-    }
+    // Se envuelve todo en try/catch/finally: un error inesperado (incluida
+    // cualquier falla al leer/escribir la caché local) nunca debe dejar el
+    // spinner de "Entregas" pegado para siempre — antes eso podía pasar
+    // porque nada garantizaba que _loading volviera a false.
+    try {
+      // Se piden las órdenes en paralelo (en vez de una por una, que sumaba
+      // todos los tiempos de red y hacía la carga de "Entregas" muy lenta),
+      // pero acotado a 12 a la vez: con mochilas grandes (50-60+ órdenes) no
+      // conviene disparar todas las peticiones de golpe.
+      final results = await _mapWithConcurrency<int, OrderModel?>(
+        uniqueIds,
+        12,
+        (id) async {
+          try {
+            return await _service.getOrderDetail(id, equipos: equipos);
+          } on ApiException catch (e) {
+            if (e.statusCode == 0) hadNetworkError = true;
+            if (e.statusCode == 401 || e.statusCode == 403) hadAuthError = true;
+            return null;
+          } catch (_) {
+            return null;
+          }
+        },
+      );
 
-    if (loaded.isNotEmpty) {
-      final normalizedFolio = folio.trim().toLowerCase();
-      _orders = normalizedFolio.isEmpty
-          ? loaded
-          : loaded.where((o) {
-              final text = '${o.folioOrdenCliente} ${o.cliente}'.toLowerCase();
-              return text.contains(normalizedFolio);
-            }).toList();
-
-      for (final o in _orders) {
-        await _localDb.upsertOrder(o);
-      }
-
-      _offline = false;
-      if (kDebugMode) {
-        debugPrint('[ORDERS] load-by-ids ok count=${_orders.length}');
-      }
-    } else {
-      // Sin resultados: intentar DB local si fue error de red
-      if (hadNetworkError) {
-        final cached = await _localDb.getAllOrders();
-        _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
-        _offline = true;
-        _errorMessage = cached.isEmpty
-            ? 'Sin conexión y sin datos guardados localmente.'
-            : 'Sin conexión — mostrando datos guardados localmente.';
-      } else {
-        _orders = [];
-        _offline = false;
-        if (hadAuthError) {
-          _errorMessage = 'Sesion expirada. Inicia sesion nuevamente.';
+      final loaded = <OrderModel>[];
+      for (final r in results) {
+        if (r != null) {
+          loaded.add(r);
         } else {
-          _errorMessage = 'No se pudieron cargar las entregas activas.';
+          failedCount++;
         }
       }
-      if (kDebugMode) {
-        debugPrint(
-          '[ORDERS] load-by-ids fallback network=$hadNetworkError auth=$hadAuthError cached=${_orders.length}',
-        );
-      }
-    }
 
-    _loading = false;
-    notifyListeners();
+      if (loaded.isNotEmpty) {
+        final normalizedFolio = folio.trim().toLowerCase();
+        _orders = normalizedFolio.isEmpty
+            ? loaded
+            : loaded.where((o) {
+                final text = '${o.folioOrdenCliente} ${o.cliente}'.toLowerCase();
+                return text.contains(normalizedFolio);
+              }).toList();
+
+        for (final o in loaded) {
+          await _localDb.upsertOrder(o);
+        }
+        // Evita que órdenes viejas (ya reasignadas o completadas) sigan
+        // apareciendo desde la caché local si más adelante falla la red.
+        await _localDb.pruneOrdersNotIn(loaded.map((o) => o.id).toList());
+
+        _offline = false;
+        _errorMessage = failedCount > 0
+            ? 'No se pudieron cargar $failedCount de ${uniqueIds.length} entregas. Desliza para reintentar.'
+            : null;
+        if (kDebugMode) {
+          debugPrint('[ORDERS] load-by-ids ok count=${_orders.length} failed=$failedCount');
+        }
+      } else {
+        // Sin resultados: intentar DB local si fue error de red
+        if (hadNetworkError) {
+          final cached = await _localDb.getAllOrders();
+          _orders = cached.map((r) => OrderModel.fromJson(r)).toList();
+          _offline = true;
+          _errorMessage = cached.isEmpty
+              ? 'Sin conexión y sin datos guardados localmente.'
+              : 'Sin conexión — mostrando datos guardados localmente.';
+        } else {
+          _orders = [];
+          _offline = false;
+          if (hadAuthError) {
+            _errorMessage = 'Sesion expirada. Inicia sesion nuevamente.';
+          } else {
+            _errorMessage = 'No se pudieron cargar las entregas activas.';
+          }
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '[ORDERS] load-by-ids fallback network=$hadNetworkError auth=$hadAuthError cached=${_orders.length}',
+          );
+        }
+      }
+    } catch (e) {
+      _offline = false;
+      _errorMessage = 'Error inesperado al cargar entregas.';
+      if (kDebugMode) {
+        debugPrint('[ORDERS] load-by-ids unexpected error: $e');
+      }
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> loadOrders(String equipos, {String folio = ''}) async {
@@ -307,9 +373,10 @@ class OrdersProvider extends ChangeNotifier {
     final edited = await _localDb.getEditedOrders();
     int synced = 0;
     for (final row in edited) {
+      final id = row['id'] as int;
       try {
         await _service.updateOrder(
-          idOrden: row['id'] as int,
+          idOrden: id,
           status: int.tryParse(row['bd_status'] ?? '0') ?? 0,
           idUsuario: int.tryParse(row['bd_idUsuario'] ?? '0') ?? 0,
           motivoStatus: int.tryParse(row['bd_idStatusMotivo'] ?? '0') ?? 0,
@@ -318,12 +385,19 @@ class OrdersProvider extends ChangeNotifier {
           latitud: double.tryParse(row['bd_latitud'] ?? ''),
           longitud: double.tryParse(row['bd_longitud'] ?? ''),
         );
+        // Antes se limpiaba el flag de TODAS las órdenes editadas en cuanto
+        // UNA sincronizaba con éxito (un UPDATE sin filtro por id).
+        // Si de 3 órdenes offline solo la primera lograba subir y las otras 2
+        // fallaban (conexión intermitente, rechazo del servidor, etc.), las 2
+        // se marcaban como "ya no pendientes" sin haberse guardado nunca en
+        // el servidor — el mensajero las veía como Exitosa en el teléfono
+        // pero el cambio jamás llegaba al sistema, ni reabriendo la app.
+        await _localDb.clearEditedOrder(id);
         synced++;
       } catch (_) {
-        // Continuar con el siguiente
+        // Se deja marcada como pendiente para reintentar en el próximo sync.
       }
     }
-    if (synced > 0) await _localDb.clearEditedOrders();
     return synced;
   }
 
