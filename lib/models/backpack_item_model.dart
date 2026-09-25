@@ -37,9 +37,23 @@ class BackpackItemModel {
 
   bool get isValidated => validation == 1;
 
+  // 1=Exitosa, 4=Cancelada: son resultados definitivos — no hay nada más que
+  // "gestionar" en esa orden, así que cuentan aunque el mensajero no haya
+  // pasado por el escaneo/validación manual de esta pantalla. 5/6 (intentos)
+  // siguen requiriendo validación explícita porque la entrega no terminó ahí.
+  static const _terminalStatuses = {1, 4};
   static const _managedStatuses = {1, 4, 5, 6};
 
-  bool get isManaged => isValidated && _managedStatuses.contains(idStatusOrden);
+  bool get isManaged {
+    if (_terminalStatuses.contains(idStatusOrden)) return true;
+    final statusText = statusName.toLowerCase();
+    if (statusText.contains('exitosa') ||
+        statusText.contains('cancelada') ||
+        statusText.contains('devuelta')) {
+      return true;
+    }
+    return isValidated && _managedStatuses.contains(idStatusOrden);
+  }
 
   String get fullAddress {
     final parts = [
