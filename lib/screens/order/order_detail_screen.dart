@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -571,6 +572,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<bool> _ensureLocationDisclosureAccepted() async {
     if (!mounted) return false;
 
+    // El aviso solo hace falta una vez: si el mensajero ya lo aceptó antes Y
+    // el permiso de ubicación en segundo plano sigue concedido, "Iniciar
+    // Viaje" no debe volver a interrumpirlo con el mismo diálogo en cada
+    // entrega — eso era lo que hacía sentir el botón lento.
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyAccepted = prefs.getBool(kPrefsLocationDisclosureAccepted) ?? false;
+    if (alreadyAccepted) {
+      final status = await Permission.locationAlways.status;
+      if (status.isGranted) return true;
+    }
+
+    if (!mounted) return false;
     final accepted = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -628,6 +641,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       // el usuario acepta el aviso destacado, antes de que aparezca el
       // diálogo del sistema operativo.
       await Permission.locationAlways.request();
+      await prefs.setBool(kPrefsLocationDisclosureAccepted, true);
     }
     return accepted;
   }
@@ -1029,7 +1043,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               _CollapsibleTextSection(
                 icon: Icons.location_on,
                 title: 'Dirección',
-                text: order.fullAddress,
+                text: order.fullAddressDetailed,
+                initiallyExpanded: true,
                 onOpenCoords: _openCoords,
               ),
               if (_enViaje)
@@ -1594,11 +1609,13 @@ class _CollapsibleTextSection extends StatelessWidget {
   final IconData icon;
   final String title;
   final String text;
+  final bool initiallyExpanded;
   final void Function(String lat, String lng)? onOpenCoords;
   const _CollapsibleTextSection({
     required this.icon,
     required this.title,
     required this.text,
+    this.initiallyExpanded = false,
     this.onOpenCoords,
   });
 
@@ -1607,6 +1624,7 @@ class _CollapsibleTextSection extends StatelessWidget {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: 4),
         leading: Icon(icon, size: 18, color: Colors.grey),
@@ -1616,6 +1634,29 @@ class _CollapsibleTextSection extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: _TextWithMapLinks(text: text, onOpenCoords: onOpenCoords),
           ),
+          if (text.trim().isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: text));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('$title copiada'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copiar', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
         ],
       ),
     );

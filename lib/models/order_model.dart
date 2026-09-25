@@ -72,6 +72,23 @@ class OrderModel {
   String get fullAddress =>
       '$calle $numExterior, $colonia, $municipioDelegacion, $estado CP $codigoPostal';
 
+  /// Dirección para mostrar al mensajero, incluyendo entre calles,
+  /// referencias y descripción de fachada cuando existen. [fullAddress] se
+  /// mantiene corta porque también se usa como query de geocodificación.
+  String get fullAddressDetailed {
+    final lines = [fullAddress];
+    if (entreCalles.trim().isNotEmpty) {
+      lines.add('Entre calles: ${entreCalles.trim()}');
+    }
+    if (referencias.trim().isNotEmpty) {
+      lines.add('Referencias: ${referencias.trim()}');
+    }
+    if (descripcionFachada.trim().isNotEmpty) {
+      lines.add('Descripción de fachada: ${descripcionFachada.trim()}');
+    }
+    return lines.join('\n');
+  }
+
   OrderModel copyWith({
     String? latitud,
     String? longitud,

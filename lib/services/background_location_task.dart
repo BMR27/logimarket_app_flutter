@@ -12,6 +12,7 @@ const String kPrefsIdOrden    = 'bg_tracking_idOrden';
 const String kPrefsFolioOrden = 'bg_tracking_folioOrden';
 const String kPrefsEnViaje    = 'bg_tracking_enViaje';
 const String kPrefsApiUrl     = 'bg_tracking_apiUrl';
+const String kPrefsLocationDisclosureAccepted = 'location_disclosure_accepted';
 
 /// Punto de entrada del foreground task — DEBE estar anotado con vm:entry-point.
 @pragma('vm:entry-point')
