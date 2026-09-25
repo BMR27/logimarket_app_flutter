@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -43,6 +44,38 @@ class _MapTabState extends State<MapTab> {
   String? _lastAddressDumpKey;
   int _coordResolvedCount = 0;
   int _coordFailedCount = 0;
+  // Muchos dispositivos (Xiaomi/Huawei/etc.) no tienen Play Services: el
+  // geocodificador nativo nunca responde y solo agrega ~4s de espera por
+  // cada intento. Tras un primer fallo se desactiva para el resto de la
+  // sesión y se va directo a los respaldos HTTP.
+  bool _nativeGeocoderUnavailable = false;
+  // Nominatim exige max. 1 solicitud/segundo; si se golpea en paralelo la IP
+  // puede quedar bloqueada y entonces NINGÚN puntero se resuelve. Esta cola
+  // serializa esas llamadas sin bloquear el resto de la resolución en paralelo.
+  Future<void> _nominatimQueue = Future.value();
+  DateTime? _lastNominatimCallAt;
+
+  Future<http.Response> _throttledNominatimGet(Uri uri) {
+    final completer = Completer<http.Response>();
+    _nominatimQueue = _nominatimQueue.then((_) async {
+      final lastAt = _lastNominatimCallAt;
+      if (lastAt != null) {
+        final elapsed = DateTime.now().difference(lastAt);
+        final wait = const Duration(milliseconds: 1100) - elapsed;
+        if (wait > Duration.zero) await Future.delayed(wait);
+      }
+      _lastNominatimCallAt = DateTime.now();
+      try {
+        final resp = await http
+            .get(uri, headers: const {'User-Agent': 'logimarket-app/1.0'})
+            .timeout(const Duration(seconds: 6));
+        completer.complete(resp);
+      } catch (e) {
+        completer.completeError(e);
+      }
+    });
+    return completer.future;
+  }
 
   static const _initialCamera = CameraPosition(
     target: LatLng(19.432608, -99.133209),
@@ -278,7 +311,14 @@ class _MapTabState extends State<MapTab> {
     BackpackItemModel item,
     Map<int, int> statusByOrderId,
   ) {
-    if (item.isValidated) return false;
+    // OJO: "validado" (item.isValidated) es un flag independiente del
+    // escaneo/gestión del paquete — NO significa que la entrega ya se
+    // resolvió. Confirmado en campo: un pedido en "Intento de Entrega (1)"
+    // (status activo, todavía pendiente de visitar) se estaba ocultando del
+    // mapa solo por tener validation=1, dejando al mensajero con muchas
+    // menos órdenes visibles en el mapa que en "Entregas". El status de la
+    // orden (Exitosa/Cancelada/etc.) es la única señal confiable de si debe
+    // seguir viéndose en el mapa.
 
     // Priorizar status numérico para evitar falsos negativos por texto parcial
     if (!_isOrderActiveInRoute(item.idStatusOrden)) {
@@ -338,13 +378,11 @@ class _MapTabState extends State<MapTab> {
       final isActive = activeIds.contains(item.idBackpackItem);
       final reason = isActive
           ? 'ACTIVA'
-          : (item.isValidated
-                ? 'EXCLUIDA:VALIDADA'
-                : (!_isOrderActiveInRoute(item.idStatusOrden)
-                    ? 'EXCLUIDA:STATUS_ITEM_CERRADO(${item.idStatusOrden})'
-                    : (orderStatus != null && !_isOrderActiveInRoute(orderStatus)
-                        ? 'EXCLUIDA:STATUS_ORDEN_CERRADO($orderStatus)'
-                        : 'EXCLUIDA:STATUS_TEXTO(${item.statusName})')));
+          : (!_isOrderActiveInRoute(item.idStatusOrden)
+              ? 'EXCLUIDA:STATUS_ITEM_CERRADO(${item.idStatusOrden})'
+              : (orderStatus != null && !_isOrderActiveInRoute(orderStatus)
+                  ? 'EXCLUIDA:STATUS_ORDEN_CERRADO($orderStatus)'
+                  : 'EXCLUIDA:STATUS_TEXTO(${item.statusName})'));
 
       debugPrint(
         '[MAP][DEBUG] OV:${item.idOrdenVenta} Folio:${item.folioOrden} Bp:${item.idBackpack} '
@@ -398,7 +436,11 @@ class _MapTabState extends State<MapTab> {
         final missingItems = buildMissingBatch();
         if (missingItems.isEmpty) break;
 
-        for (final item in missingItems) {
+        // Los items del lote se resuelven en paralelo: cada uno espera su
+        // propio geocoding, pero ya no se suman sus tiempos como si fuera
+        // secuencial. La cola interna de Nominatim sigue serializando solo
+        // esa parte para respetar su límite de 1 req/seg.
+        await Future.wait(missingItems.map((item) async {
           final orderId = item.idOrdenVenta;
           _coordLookupAttemptsByOrderId[orderId] =
               (_coordLookupAttemptsByOrderId[orderId] ?? 0) + 1;
@@ -462,10 +504,11 @@ class _MapTabState extends State<MapTab> {
           } else {
             _coordFailedCount++;
           }
-        }
+        }));
 
         if (mounted) setState(() {});
-        await Future.delayed(const Duration(milliseconds: 450));
+        // Ya no hace falta un delay artificial entre lotes: el paralelismo
+        // dentro del lote y la cola de Nominatim ya espacian las llamadas.
       }
     } finally {
       _resolvingMissingCoords = false;
@@ -510,7 +553,7 @@ class _MapTabState extends State<MapTab> {
         final missing = buildMissingBatch();
         if (missing.isEmpty) break;
 
-        for (final order in missing) {
+        await Future.wait(missing.map((order) async {
           _coordLookupAttemptsByOrderId[order.id] =
               (_coordLookupAttemptsByOrderId[order.id] ?? 0) + 1;
           _coordLastAttemptAtByOrderId[order.id] = DateTime.now();
@@ -519,10 +562,9 @@ class _MapTabState extends State<MapTab> {
           if (resolved != null) {
             _derivedCoordsByOrderId[order.id] = resolved;
           }
-        }
+        }));
 
         if (mounted) setState(() {});
-        await Future.delayed(const Duration(milliseconds: 450));
       }
     } finally {
       _resolvingMissingOrderCoords = false;
@@ -598,19 +640,23 @@ class _MapTabState extends State<MapTab> {
     try {
       // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma).
       // Sin Play Services (común en Xiaomi/Huawei/etc.) esta llamada puede
-      // colgarse mucho tiempo sin fallar — con timeout cae rápido al respaldo HTTP.
-      try {
-        final locations = await geo
-            .locationFromAddress(query)
-            .timeout(const Duration(seconds: 4));
-        if (locations.isNotEmpty) {
-          final loc = locations.first;
-          if (_isWithinMexico(loc.latitude, loc.longitude)) {
-            return LatLng(loc.latitude, loc.longitude);
+      // colgarse mucho tiempo sin fallar — con timeout cae rápido al respaldo HTTP,
+      // y tras el primer fallo se desactiva para el resto de la sesión.
+      if (!_nativeGeocoderUnavailable) {
+        try {
+          final locations = await geo
+              .locationFromAddress(query)
+              .timeout(const Duration(seconds: 4));
+          if (locations.isNotEmpty) {
+            final loc = locations.first;
+            if (_isWithinMexico(loc.latitude, loc.longitude)) {
+              return LatLng(loc.latitude, loc.longitude);
+            }
           }
+        } catch (_) {
+          // Fallback a proveedores HTTP; no reintentar el nativo esta sesión.
+          _nativeGeocoderUnavailable = true;
         }
-      } catch (_) {
-        // Fallback a proveedores HTTP
       }
 
       // 2) Google Geocoding API (si hay key disponible)
@@ -621,31 +667,34 @@ class _MapTabState extends State<MapTab> {
           '?address=${Uri.encodeComponent(query)}&region=mx&language=es&key=${Uri.encodeComponent(googleKey)}',
         );
 
-        final googleResp = await http.get(googleUri);
-        if (googleResp.statusCode == 200) {
-          final googleData = jsonDecode(googleResp.body) as Map<String, dynamic>;
-          final status = (googleData['status'] ?? '').toString();
-          if (status == 'OK') {
-            final results = (googleData['results'] as List?) ?? const [];
-            if (results.isNotEmpty) {
-              final location = (results.first['geometry']?['location']) as Map<String, dynamic>?;
-              final lat = (location?['lat'] as num?)?.toDouble();
-              final lng = (location?['lng'] as num?)?.toDouble();
-              if (lat != null && lng != null && _isWithinMexico(lat, lng)) return LatLng(lat, lng);
+        try {
+          final googleResp = await http.get(googleUri).timeout(const Duration(seconds: 6));
+          if (googleResp.statusCode == 200) {
+            final googleData = jsonDecode(googleResp.body) as Map<String, dynamic>;
+            final status = (googleData['status'] ?? '').toString();
+            if (status == 'OK') {
+              final results = (googleData['results'] as List?) ?? const [];
+              if (results.isNotEmpty) {
+                final location = (results.first['geometry']?['location']) as Map<String, dynamic>?;
+                final lat = (location?['lat'] as num?)?.toDouble();
+                final lng = (location?['lng'] as num?)?.toDouble();
+                if (lat != null && lng != null && _isWithinMexico(lat, lng)) return LatLng(lat, lng);
+              }
             }
           }
+        } catch (_) {
+          // Cae al respaldo de Nominatim en vez de abortar toda la búsqueda.
         }
       }
 
-      // 3) Nominatim como último respaldo
+      // 3) Nominatim como último respaldo. Se serializa (máx. 1 req/seg) para
+      // no violar su política de uso — de lo contrario la IP puede quedar
+      // bloqueada y entonces ningún puntero llega a resolverse.
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
         '?q=${Uri.encodeComponent(query)}&format=json&limit=1&countrycodes=mx',
       );
-      final response = await http.get(
-        uri,
-        headers: const {'User-Agent': 'logimarket-app/1.0'},
-      );
+      final response = await _throttledNominatimGet(uri);
       if (response.statusCode != 200) return null;
       final data = jsonDecode(response.body) as List;
       if (data.isEmpty) return null;
@@ -714,7 +763,10 @@ class _MapTabState extends State<MapTab> {
     Map<String, LatLng> coordsByFolio,
   ) {
     final pointsKeyToIndices = <String, List<int>>{};
-    final orderedItems = items.where((i) => !i.isValidated).toList();
+    // `items` ya viene filtrado por status activo (_isBackpackItemActiveInRoute)
+    // desde el caller — no se vuelve a excluir por "validado", que es un flag
+    // independiente de si la entrega sigue pendiente.
+    final orderedItems = items;
     final basePositions = <LatLng>[];
 
     for (var idx = 0; idx < orderedItems.length; idx++) {
