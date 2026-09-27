@@ -54,6 +54,30 @@ class _MapTabState extends State<MapTab> {
   // serializa esas llamadas sin bloquear el resto de la resolución en paralelo.
   Future<void> _nominatimQueue = Future.value();
   DateTime? _lastNominatimCallAt;
+  // Centro aproximado de cada CP. Sirve para descartar geocodificaciones que
+  // caen en otra ciudad (p. ej. "Valle Hermoso" resuelto en Monterrey para un
+  // CP de Tlalnepantla). Se guarda el Future para no repetir consultas en paralelo.
+  final Map<String, Future<LatLng?>> _cpAnchorCache = {};
+  static const double _maxKmFromCpAnchor = 10;
+  final Set<int> _persistedGeocodeOrderIds = <int>{};
+
+  // Guarda el punto en el backend para que la orden no se vuelva a geocodificar
+  // en ningún celular. Dispara y olvida: nunca se espera ni bloquea el mapa, y
+  // si falla (sin red, etc.) simplemente se reintenta en otra sesión.
+  void _persistGeocode(int orderId, LatLng point, LatLng? anchor) {
+    if (orderId <= 0 || !_persistedGeocodeOrderIds.add(orderId)) return;
+    final precision = point == anchor ? 'cp' : 'direccion';
+    unawaited(_ordersService
+        .saveOrderGeocode(
+          orderId,
+          latitud: point.latitude,
+          longitud: point.longitude,
+          precision: precision,
+        )
+        .catchError((_) {
+          _persistedGeocodeOrderIds.remove(orderId);
+        }));
+  }
 
   Future<http.Response> _throttledNominatimGet(Uri uri) {
     final completer = Completer<http.Response>();
@@ -299,6 +323,112 @@ class _MapTabState extends State<MapTab> {
     return lat >= 14.5 && lat <= 32.7 && lng >= -117.1 && lng <= -86.7;
   }
 
+  // Un resultado solo se acepta si está en México y, cuando se conoce el
+  // centro del CP de la orden, a no más de [_maxKmFromCpAnchor] km de él.
+  bool _isAcceptableGeocode(double lat, double lng, LatLng? anchor) {
+    if (!_isWithinMexico(lat, lng)) return false;
+    if (anchor == null) return true;
+    final meters = Geolocator.distanceBetween(
+      anchor.latitude, anchor.longitude, lat, lng,
+    );
+    return meters <= _maxKmFromCpAnchor * 1000;
+  }
+
+  Future<LatLng?> _cpAnchor(String? rawCp) {
+    final cp = (rawCp ?? '').replaceAll(RegExp(r'\D'), '');
+    if (cp.length != 5) return Future.value(null);
+    return _cpAnchorCache.putIfAbsent(cp, () {
+      return _fetchCpAnchor(cp).then((value) {
+        // Si falló (red, cuota), permitir reintentar en la siguiente vuelta.
+        if (value == null) _cpAnchorCache.remove(cp);
+        return value;
+      });
+    });
+  }
+
+  Future<LatLng?> _fetchCpAnchor(String cp) async {
+    final googleKey = ApiConfig.mapsApiKey.trim();
+    if (googleKey.isNotEmpty) {
+      try {
+        final uri = Uri.parse(
+          'https://maps.googleapis.com/maps/api/geocode/json'
+          '?components=${Uri.encodeComponent('postal_code:$cp|country:MX')}'
+          '&language=es&key=${Uri.encodeComponent(googleKey)}',
+        );
+        final resp = await http.get(uri).timeout(const Duration(seconds: 6));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if ((data['status'] ?? '').toString() == 'OK') {
+            for (final r in (data['results'] as List? ?? const [])) {
+              final components = (r['address_components'] as List?) ?? const [];
+              final matchesCp = components.any((c) =>
+                  ((c['types'] as List?) ?? const []).contains('postal_code') &&
+                  (c['long_name'] ?? '').toString() == cp);
+              if (!matchesCp) continue;
+              final loc = r['geometry']?['location'] as Map<String, dynamic>?;
+              final lat = (loc?['lat'] as num?)?.toDouble();
+              final lng = (loc?['lng'] as num?)?.toDouble();
+              if (lat != null && lng != null && _isWithinMexico(lat, lng)) {
+                return LatLng(lat, lng);
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Cae a Nominatim.
+      }
+    }
+
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?postalcode=$cp&countrycodes=mx&format=json&limit=1',
+      );
+      final resp = await _throttledNominatimGet(uri);
+      if (resp.statusCode != 200) return null;
+      final data = jsonDecode(resp.body) as List;
+      if (data.isEmpty) return null;
+      final lat = double.tryParse((data.first['lat'] ?? '').toString());
+      final lng = double.tryParse((data.first['lon'] ?? '').toString());
+      if (lat == null || lng == null || !_isWithinMexico(lat, lng)) return null;
+      return LatLng(lat, lng);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // El geocodificador lee "Mexico" como el país, no como el Estado de México.
+  String _normalizeEstado(String estado) {
+    final e = estado.trim();
+    final key = e
+        .toLowerCase()
+        .replaceAll('é', 'e')
+        .replaceAll('.', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    const edomex = {
+      'mexico', 'estado de mexico', 'edo de mexico', 'edo mex', 'edomex',
+      'edo mexico', 'mex', 'edo de mex',
+    };
+    return edomex.contains(key) ? 'Estado de México' : e;
+  }
+
+  // Algunos clientes capturan entre calles y referencias dentro del campo de
+  // calle ("Calle.azalias ... entre camelias y dalias la casa es de piedra");
+  // con ese ruido el geocodificador se queda con la frase más conocida del
+  // texto. Se corta en la primera palabra típica de referencia.
+  static final RegExp _streetNoise = RegExp(
+    r'\s+(entre|esquina|esq|frente|junto|cerca de|atras|atrás|a un lado|a lado|la casa|casa de)(\s|\.|,|$).*$',
+    caseSensitive: false,
+  );
+
+  String _cleanStreet(String raw) {
+    return raw
+        .replaceFirst(RegExp(r'^\s*calle\s*\.\s*', caseSensitive: false), 'Calle ')
+        .replaceFirst(_streetNoise, '')
+        .trim();
+  }
+
   bool _isOrderActiveInRoute(int statusId) {
     // Excluir status cerrados por ID numérico
     // 1=Exitosa, 4=Cancelada, 8,9,10=otros cerrados
@@ -351,7 +481,8 @@ class _MapTabState extends State<MapTab> {
       }
       final query = order.fullAddress.trim();
       if (query.isEmpty) return null;
-      return await _geocodeAddress(query);
+      final anchor = await _cpAnchor(order.codigoPostal);
+      return await _geocodeAddress(query, anchor: anchor) ?? anchor;
     } catch (_) {
       return null;
     }
@@ -449,9 +580,11 @@ class _MapTabState extends State<MapTab> {
 
           final order = orderById[orderId];
           final candidates = _buildAddressCandidates(item, order);
+          final anchor =
+              await _cpAnchor(item.codigoPostal ?? order?.codigoPostal);
 
           for (final address in candidates) {
-            resolved = await _geocodeAddress(address);
+            resolved = await _geocodeAddress(address, anchor: anchor);
             if (resolved != null) break;
           }
 
@@ -469,8 +602,11 @@ class _MapTabState extends State<MapTab> {
                     await _ordersService.getOrderDetail(orderId, equipos: eq);
                 debugPrint('[MAP][DETAIL] OV:$orderId eq:"$eq" addr:"${detail.fullAddress}" lat:${detail.latitud}');
                 final detailCandidates = _buildAddressCandidates(item, detail);
+                final detailAnchor =
+                    anchor ?? await _cpAnchor(detail.codigoPostal);
                 for (final address in detailCandidates) {
-                  resolved = await _geocodeAddress(address);
+                  resolved =
+                      await _geocodeAddress(address, anchor: detailAnchor);
                   if (resolved != null) break;
                 }
                 resolved ??= await _resolveCoordFromOrder(detail);
@@ -486,8 +622,9 @@ class _MapTabState extends State<MapTab> {
                 final addr = await _ordersService.getOrderAddress(orderId);
                 debugPrint('[MAP][ADDR] OV:$orderId addr:"${addr.fullAddress}" lat:${addr.latitud}');
                 final addrCandidates = _buildAddressCandidates(item, addr);
+                final addrAnchor = anchor ?? await _cpAnchor(addr.codigoPostal);
                 for (final address in addrCandidates) {
-                  resolved = await _geocodeAddress(address);
+                  resolved = await _geocodeAddress(address, anchor: addrAnchor);
                   if (resolved != null) break;
                 }
                 resolved ??= await _resolveCoordFromOrder(addr);
@@ -498,8 +635,12 @@ class _MapTabState extends State<MapTab> {
             }
           }
 
+          // Sin coincidencia confiable: al menos dejar el pin en la zona del CP.
+          resolved ??= anchor;
+
           if (resolved != null) {
             _derivedCoordsByOrderId[orderId] = resolved;
+            _persistGeocode(orderId, resolved, anchor);
             _coordResolvedCount++;
           } else {
             _coordFailedCount++;
@@ -561,6 +702,8 @@ class _MapTabState extends State<MapTab> {
           final resolved = await _resolveCoordFromOrder(order);
           if (resolved != null) {
             _derivedCoordsByOrderId[order.id] = resolved;
+            // Ya está en caché: no hace otra consulta.
+            _persistGeocode(order.id, resolved, await _cpAnchor(order.codigoPostal));
           }
         }));
 
@@ -575,7 +718,7 @@ class _MapTabState extends State<MapTab> {
   List<String> _buildAddressCandidates(BackpackItemModel item, OrderModel? order) {
     final candidates = <String>[];
     // Contexto de estado para anclar la búsqueda en la zona correcta
-    final estado = (item.estado ?? order?.estado ?? '').trim();
+    final estado = _normalizeEstado(item.estado ?? order?.estado ?? '');
     final municipio = (item.municipio ?? order?.municipioDelegacion ?? '').trim();
     final suffix = estado.isNotEmpty ? ', $estado, Mexico' : ', Mexico';
 
@@ -589,7 +732,8 @@ class _MapTabState extends State<MapTab> {
     }
 
     // Candidato más específico primero: calle + municipio + estado
-    final calle = '${item.calle ?? ''} ${item.numExterior ?? ''}'.trim();
+    final calle =
+        '${_cleanStreet(item.calle ?? '')} ${item.numExterior ?? ''}'.trim();
     final colonia = item.colonia ?? '';
     final cp = (item.codigoPostal ?? order?.codigoPostal ?? '').trim();
 
@@ -616,9 +760,10 @@ class _MapTabState extends State<MapTab> {
     add(item.fullAddress);
 
     if (order != null) {
-      final oCalle = '${order.calle} ${order.numExterior}'.trim();
+      final oCalle =
+          '${_cleanStreet(order.calle)} ${order.numExterior}'.trim();
       final oMunicipio = order.municipioDelegacion.trim();
-      final oEstado = order.estado.trim();
+      final oEstado = _normalizeEstado(order.estado);
       final oCP = order.codigoPostal.trim();
       if (oCP.isNotEmpty && oCalle.isNotEmpty) {
         candidates.add('$oCalle, ${order.colonia}, CP $oCP, Mexico');
@@ -636,7 +781,9 @@ class _MapTabState extends State<MapTab> {
     return candidates;
   }
 
-  Future<LatLng?> _geocodeAddress(String query) async {
+  /// [anchor] es el centro del CP de la orden; si se da, cualquier resultado
+  /// fuera de [_maxKmFromCpAnchor] km se descarta y se prueba el siguiente.
+  Future<LatLng?> _geocodeAddress(String query, {LatLng? anchor}) async {
     try {
       // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma).
       // Sin Play Services (común en Xiaomi/Huawei/etc.) esta llamada puede
@@ -647,9 +794,8 @@ class _MapTabState extends State<MapTab> {
           final locations = await geo
               .locationFromAddress(query)
               .timeout(const Duration(seconds: 4));
-          if (locations.isNotEmpty) {
-            final loc = locations.first;
-            if (_isWithinMexico(loc.latitude, loc.longitude)) {
+          for (final loc in locations) {
+            if (_isAcceptableGeocode(loc.latitude, loc.longitude, anchor)) {
               return LatLng(loc.latitude, loc.longitude);
             }
           }
@@ -664,7 +810,7 @@ class _MapTabState extends State<MapTab> {
       if (googleKey.isNotEmpty) {
         final googleUri = Uri.parse(
           'https://maps.googleapis.com/maps/api/geocode/json'
-          '?address=${Uri.encodeComponent(query)}&region=mx&language=es&key=${Uri.encodeComponent(googleKey)}',
+          '?address=${Uri.encodeComponent(query)}&components=country:MX&region=mx&language=es&key=${Uri.encodeComponent(googleKey)}',
         );
 
         try {
@@ -674,11 +820,13 @@ class _MapTabState extends State<MapTab> {
             final status = (googleData['status'] ?? '').toString();
             if (status == 'OK') {
               final results = (googleData['results'] as List?) ?? const [];
-              if (results.isNotEmpty) {
-                final location = (results.first['geometry']?['location']) as Map<String, dynamic>?;
+              for (final result in results) {
+                final location = (result['geometry']?['location']) as Map<String, dynamic>?;
                 final lat = (location?['lat'] as num?)?.toDouble();
                 final lng = (location?['lng'] as num?)?.toDouble();
-                if (lat != null && lng != null && _isWithinMexico(lat, lng)) return LatLng(lat, lng);
+                if (lat != null && lng != null && _isAcceptableGeocode(lat, lng, anchor)) {
+                  return LatLng(lat, lng);
+                }
               }
             }
           }
@@ -692,17 +840,20 @@ class _MapTabState extends State<MapTab> {
       // bloqueada y entonces ningún puntero llega a resolverse.
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
-        '?q=${Uri.encodeComponent(query)}&format=json&limit=1&countrycodes=mx',
+        '?q=${Uri.encodeComponent(query)}&format=json&limit=5&countrycodes=mx',
       );
       final response = await _throttledNominatimGet(uri);
       if (response.statusCode != 200) return null;
       final data = jsonDecode(response.body) as List;
-      if (data.isEmpty) return null;
-      final geoLat = double.tryParse((data.first['lat'] ?? '').toString());
-      final geoLng = double.tryParse((data.first['lon'] ?? '').toString());
-      if (geoLat == null || geoLng == null) return null;
-      if (!_isWithinMexico(geoLat, geoLng)) return null;
-      return LatLng(geoLat, geoLng);
+      for (final entry in data) {
+        final geoLat = double.tryParse((entry['lat'] ?? '').toString());
+        final geoLng = double.tryParse((entry['lon'] ?? '').toString());
+        if (geoLat == null || geoLng == null) continue;
+        if (_isAcceptableGeocode(geoLat, geoLng, anchor)) {
+          return LatLng(geoLat, geoLng);
+        }
+      }
+      return null;
     } catch (_) {
       return null;
     }

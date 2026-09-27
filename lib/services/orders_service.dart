@@ -60,6 +60,22 @@ class OrdersService extends ApiService {
     return OrderModel.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Guarda en el backend el punto ya validado contra el CP para que ningún
+  /// otro celular ni sesión tenga que volver a geocodificar esta orden.
+  /// [precision]: 'direccion' o 'cp' (centro del CP como último recurso).
+  Future<void> saveOrderGeocode(
+    int idOrden, {
+    required double latitud,
+    required double longitud,
+    required String precision,
+  }) async {
+    await put(ApiConfig.orderGeocode(idOrden), {
+      'latitud': latitud,
+      'longitud': longitud,
+      'precision': precision,
+    });
+  }
+
   Future<void> updateOrder({
     required int idOrden,
     required int status,

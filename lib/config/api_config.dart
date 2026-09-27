@@ -23,6 +23,7 @@ class ApiConfig {
   static String orderDetail(int id, {String equipos = ''}) =>
       '$baseUrl/orders/$id?equipos=${Uri.encodeComponent(equipos)}';
   static String orderAddress(int id) => '$baseUrl/orders/$id/address';
+  static String orderGeocode(int id) => '$baseUrl/orders/$id/geocode';
   static String updateOrder(int id) => '$baseUrl/orders/$id';
   static String orderNotes(int id) => '$baseUrl/orders/$id/notes';
   static String orderPriceRequest(int id) => '$baseUrl/orders/$id/price-request';
