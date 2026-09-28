@@ -47,6 +47,9 @@ class OrdersProvider extends ChangeNotifier {
   bool _offline = false;
   bool _syncingOffline = false;
   String? _errorMessage;
+  // Error propio del detalle: separado de [_errorMessage] (lista) para que una
+  // recarga de la lista no muestre su aviso en la pantalla de detalle.
+  String? _detailErrorMessage;
 
   /// Limpia la lista sin caer en el fallback de caché local de [loadOrdersByIds],
   /// que asume "sin conexión" ante una lista de ids vacía. Se usa cuando la
@@ -65,6 +68,7 @@ class OrdersProvider extends ChangeNotifier {
   bool get loading => _loading;
   bool get offline => _offline;
   String? get errorMessage => _errorMessage;
+  String? get detailErrorMessage => _detailErrorMessage;
 
   Future<void> loadOrdersByIds(
     String equipos,
@@ -109,33 +113,18 @@ class OrdersProvider extends ChangeNotifier {
     // spinner de "Entregas" pegado para siempre — antes eso podía pasar
     // porque nada garantizaba que _loading volviera a false.
     try {
-      // Se piden las órdenes en paralelo (en vez de una por una, que sumaba
-      // todos los tiempos de red y hacía la carga de "Entregas" muy lenta),
-      // pero acotado a 12 a la vez: con mochilas grandes (50-60+ órdenes) no
-      // conviene disparar todas las peticiones de golpe.
-      final results = await _mapWithConcurrency<int, OrderModel?>(
-        uniqueIds,
-        12,
-        (id) async {
-          try {
-            return await _service.getOrderDetail(id, equipos: equipos);
-          } on ApiException catch (e) {
-            if (e.statusCode == 0) hadNetworkError = true;
-            if (e.statusCode == 401 || e.statusCode == 403) hadAuthError = true;
-            return null;
-          } catch (_) {
-            return null;
-          }
-        },
-      );
-
-      final loaded = <OrderModel>[];
-      for (final r in results) {
-        if (r != null) {
-          loaded.add(r);
-        } else {
-          failedCount++;
-        }
+      // Una sola petición (POST /orders/batch) por bloque de hasta 100 órdenes, en
+      // vez de una por orden: con datos móviles, decenas de conexiones simultáneas
+      // se caían antes de llegar al servidor, y con 80+ mensajeros eran miles de
+      // peticiones contra el backend. Si la API aún no tiene el endpoint, se usa
+      // la carga por orden de siempre.
+      final fetch = await _fetchOrdersByIds(uniqueIds, equipos);
+      final loaded = fetch.loaded;
+      failedCount = fetch.failed;
+      hadNetworkError = fetch.networkError;
+      hadAuthError = fetch.authError;
+      for (final o in loaded) {
+        _orderDetailCache[o.id] = o;
       }
 
       if (loaded.isNotEmpty) {
@@ -156,7 +145,7 @@ class OrdersProvider extends ChangeNotifier {
 
         _offline = false;
         _errorMessage = failedCount > 0
-            ? 'No se pudieron cargar $failedCount de ${uniqueIds.length} entregas. Desliza para reintentar.'
+            ? 'No se pudieron cargar $failedCount de ${uniqueIds.length - fetch.missing} entregas. Desliza para reintentar.'
             : null;
         if (kDebugMode) {
           debugPrint('[ORDERS] load-by-ids ok count=${_orders.length} failed=$failedCount');
@@ -195,6 +184,99 @@ class OrdersProvider extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     }
+  }
+
+  static const int _batchSize = 100;
+  static const List<Duration> _retryDelays = [
+    Duration.zero,
+    Duration(seconds: 1),
+    Duration(seconds: 3),
+  ];
+
+  /// Carga el detalle de [ids] con el endpoint batch (reintentos con espera
+  /// creciente ante fallas de red). Si el servidor no conoce el endpoint
+  /// (404/405, API anterior), cae a la carga por orden con un reintento.
+  Future<({List<OrderModel> loaded, int failed, int missing, bool networkError, bool authError})>
+      _fetchOrdersByIds(List<int> ids, String equipos) async {
+    final loaded = <OrderModel>[];
+    var failed = 0;
+    var missing = 0;
+    var networkError = false;
+    var authError = false;
+    var batchUnsupported = false;
+
+    for (var start = 0; start < ids.length && !batchUnsupported; start += _batchSize) {
+      final chunk = ids.sublist(start, (start + _batchSize).clamp(0, ids.length));
+      var done = false;
+      for (final delay in _retryDelays) {
+        if (delay > Duration.zero) await Future.delayed(delay);
+        try {
+          final r = await _service.getOrdersBatch(chunk, equipos: equipos);
+          loaded.addAll(r.orders);
+          missing += r.missing.length;
+          final returned = r.orders.map((o) => o.id).toSet()..addAll(r.missing);
+          failed += chunk.where((id) => !returned.contains(id)).length;
+          done = true;
+          break;
+        } on ApiException catch (e) {
+          // 404/405: la API aún no tiene el endpoint. -1: respondió algo que no es
+          // un batch (p. ej. un proxy o una versión vieja) — se usa la carga por orden.
+          if (e.statusCode == 404 || e.statusCode == 405 || e.statusCode == -1) {
+            batchUnsupported = true;
+            break;
+          }
+          if (e.statusCode == 401 || e.statusCode == 403) {
+            authError = true;
+            break;
+          }
+          if (e.statusCode == 0) networkError = true;
+        } catch (_) {
+          // Respuesta inesperada: se reintenta igual que una falla de red.
+        }
+      }
+      if (!done && !batchUnsupported) failed += chunk.length;
+    }
+
+    if (!batchUnsupported) {
+      loaded.sort((x, y) => x.id.compareTo(y.id));
+      return (loaded: loaded, failed: failed, missing: missing, networkError: networkError, authError: authError);
+    }
+
+    // API anterior sin /orders/batch: carga por orden (6 a la vez) y un segundo
+    // intento solo para las que fallaron por red. Las 404 ya no existen: no se
+    // reintentan ni cuentan como fallidas.
+    final yaCargadas = loaded.map((o) => o.id).toSet();
+    final inexistentes = <int>{};
+    Future<OrderModel?> uno(int id) async {
+      try {
+        return await _service.getOrderDetail(id, equipos: equipos);
+      } on ApiException catch (e) {
+        if (e.statusCode == 0) networkError = true;
+        if (e.statusCode == 401 || e.statusCode == 403) authError = true;
+        if (e.statusCode == 404) inexistentes.add(id);
+        return null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    var restantes = ids.where((id) => !yaCargadas.contains(id)).toList();
+    for (var intento = 0; intento < 2 && restantes.isNotEmpty && !authError; intento++) {
+      if (intento > 0) await Future.delayed(const Duration(seconds: 1));
+      final results = await _mapWithConcurrency<int, OrderModel?>(restantes, 6, uno);
+      final siguientes = <int>[];
+      for (var i = 0; i < restantes.length; i++) {
+        final r = results[i];
+        if (r != null) {
+          loaded.add(r);
+        } else if (!inexistentes.contains(restantes[i])) {
+          siguientes.add(restantes[i]);
+        }
+      }
+      restantes = siguientes;
+    }
+    loaded.sort((x, y) => x.id.compareTo(y.id));
+    return (loaded: loaded, failed: restantes.length, missing: inexistentes.length, networkError: networkError, authError: authError);
   }
 
   Future<void> loadOrders(String equipos, {String folio = ''}) async {
@@ -270,37 +352,58 @@ class OrdersProvider extends ChangeNotifier {
   }
 
   Future<void> selectOrder(int id, String equipos) async {
-    final cachedOrder = _orderDetailCache[id];
+    // La orden ya viene completa en la lista (batch) o en la caché: se muestra
+    // de inmediato y se refresca en segundo plano.
+    OrderModel? cachedOrder = _orderDetailCache[id];
+    if (cachedOrder == null) {
+      for (final o in _orders) {
+        if (o.id == id) {
+          cachedOrder = o;
+          break;
+        }
+      }
+    }
     final cachedProducts = _orderProductsCache[id];
 
     _loading = true;
     _selectedOrder = cachedOrder;
     _products = cachedProducts != null ? List<ProductModel>.from(cachedProducts) : [];
-    _errorMessage = null;
+    _detailErrorMessage = null;
     notifyListeners();
-    try {
-      final results = await Future.wait<dynamic>([
-        _service.getOrderDetail(id, equipos: equipos),
-        _service.getProducts(id),
-      ]);
 
-      _selectedOrder = results[0] as OrderModel;
-      _products = results[1] as List<ProductModel>;
-      _orderDetailCache[id] = _selectedOrder!;
-      _orderProductsCache[id] = List<ProductModel>.from(_products);
-    } on ApiException catch (e) {
-      _errorMessage = e.message;
-      if (e.statusCode == 404) {
-        // La orden ya no existe en el servidor (borrada/depurada) — no dejarla
-        // en caché ni en el listado local para que no se siga mostrando.
-        _selectedOrder = null;
-        _orderDetailCache.remove(id);
-        _orderProductsCache.remove(id);
-        _orders = _orders.where((o) => o.id != id).toList();
+    for (var intento = 0; intento < 2; intento++) {
+      if (intento > 0) await Future.delayed(const Duration(seconds: 1));
+      try {
+        final results = await Future.wait<dynamic>([
+          _service.getOrderDetail(id, equipos: equipos),
+          _service.getProducts(id),
+        ]);
+
+        _selectedOrder = results[0] as OrderModel;
+        _products = results[1] as List<ProductModel>;
+        _orderDetailCache[id] = _selectedOrder!;
+        _orderProductsCache[id] = List<ProductModel>.from(_products);
+        _detailErrorMessage = null;
+        break;
+      } on ApiException catch (e) {
+        _detailErrorMessage = e.message;
+        if (e.statusCode == 404) {
+          // La orden ya no existe en el servidor (borrada/depurada) — no dejarla
+          // en caché ni en el listado local para que no se siga mostrando.
+          _selectedOrder = null;
+          _orderDetailCache.remove(id);
+          _orderProductsCache.remove(id);
+          _orders = _orders.where((o) => o.id != id).toList();
+          break;
+        }
+        if (e.statusCode == 401 || e.statusCode == 403) break;
+      } catch (e) {
+        _detailErrorMessage = 'Error al cargar la orden: $e';
       }
-    } catch (e) {
-      _errorMessage = 'Error al cargar la orden: $e';
     }
+    // Si hay orden en pantalla (de la lista/caché) no se bloquea por un fallo
+    // de red al refrescarla.
+    if (_selectedOrder != null && _detailErrorMessage != null) _detailErrorMessage = null;
     _loading = false;
     notifyListeners();
   }

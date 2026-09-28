@@ -23,6 +23,8 @@ class ApiConfig {
   static String orderDetail(int id, {String equipos = ''}) =>
       '$baseUrl/orders/$id?equipos=${Uri.encodeComponent(equipos)}';
   static String orderAddress(int id) => '$baseUrl/orders/$id/address';
+  /// Detalle de varias órdenes en una sola petición (carga de la mochila).
+  static const String ordersBatch = '$baseUrl/orders/batch';
   static String orderGeocode(int id) => '$baseUrl/orders/$id/geocode';
   static String updateOrder(int id) => '$baseUrl/orders/$id';
   static String orderNotes(int id) => '$baseUrl/orders/$id/notes';
@@ -56,4 +58,7 @@ class ApiConfig {
   // Ubicación en tiempo real
   static const String ubicacion = '$baseUrl/ubicacion';
   static String ubicacionMensajero(int id) => '$baseUrl/ubicacion/$id';
+
+  // Mensajes WhatsApp (aviso de entrega / encuesta de satisfacción)
+  static String orderMensajes(int id) => '$baseUrl/orders/$id/mensajes';
 }

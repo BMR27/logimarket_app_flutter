@@ -4,6 +4,7 @@ import 'providers/auth_provider.dart';
 import 'providers/orders_provider.dart';
 import 'providers/backpacks_provider.dart';
 import 'providers/map_navigation_provider.dart';
+import 'providers/mensajes_provider.dart';
 import 'services/location_tracking_service.dart';
 import 'utils/app_theme.dart';
 import 'screens/splash/splash_screen.dart';
@@ -27,6 +28,7 @@ class LogimarketApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => OrdersProvider()),
         ChangeNotifierProvider(create: (_) => BackpacksProvider()),
         ChangeNotifierProvider(create: (_) => MapNavigationProvider()),
+        ChangeNotifierProvider(create: (_) => MensajesProvider()),
       ],
       child: const _AppLifecycleWrapper(),
     );

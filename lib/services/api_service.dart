@@ -10,6 +10,12 @@ class ApiService {
   static const _storage = FlutterSecureStorage();
   static const String _tokenKey = 'jwt_token';
 
+  // Un solo cliente para toda la app: reutiliza la conexión TLS (keep-alive) en
+  // vez de abrir una nueva por request. Con datos móviles, abrir decenas de
+  // conexiones seguras a la vez hacía que muchas se cayeran antes de llegar al
+  // servidor ("No se pudieron cargar X de N entregas").
+  static final http.Client _client = http.Client();
+
   static Future<String?> getToken() => safeSecureRead(_storage, _tokenKey);
   static Future<void> saveToken(String token) =>
       _storage.write(key: _tokenKey, value: token);
@@ -59,11 +65,11 @@ class ApiService {
 
   Future<dynamic> get(String url) async {
     try {
-      final response = await http
+      final response = await _client
           .get(Uri.parse(url), headers: await _headers())
           .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
-    } on SocketException catch (e) {
+    } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
       await _throwNetworkException(e);
@@ -78,11 +84,11 @@ class ApiService {
     Duration timeout = const Duration(seconds: 20),
   }) async {
     try {
-      final response = await http
+      final response = await _client
           .post(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
           .timeout(timeout);
       return _handleResponse(response);
-    } on SocketException catch (e) {
+    } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
       await _throwNetworkException(e);
@@ -93,11 +99,11 @@ class ApiService {
 
   Future<dynamic> put(String url, Map<String, dynamic> body) async {
     try {
-      final response = await http
+      final response = await _client
           .put(Uri.parse(url), headers: await _headers(), body: jsonEncode(body))
           .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
-    } on SocketException catch (e) {
+    } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
       await _throwNetworkException(e);
@@ -108,11 +114,11 @@ class ApiService {
 
   Future<dynamic> delete(String url) async {
     try {
-      final response = await http
+      final response = await _client
           .delete(Uri.parse(url), headers: await _headers())
           .timeout(const Duration(seconds: 20));
       return _handleResponse(response);
-    } on SocketException catch (e) {
+    } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
       await _throwNetworkException(e);

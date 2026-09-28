@@ -958,7 +958,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (order == null) {
-      final isNotFound = ordersProvider.errorMessage == 'Orden no encontrada';
+      final isNotFound = ordersProvider.detailErrorMessage == 'Orden no encontrada';
       return Scaffold(
         appBar: AppBar(title: const Text('Detalle de orden')),
         body: Center(
@@ -972,7 +972,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Text(
                   isNotFound
                       ? 'Esta orden ya no está disponible. Puede que haya sido eliminada o actualizada por otro usuario.'
-                      : (ordersProvider.errorMessage ?? 'No se pudo cargar la orden'),
+                      : (ordersProvider.detailErrorMessage ?? 'No se pudo cargar la orden'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 16),
                 ),

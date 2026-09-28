@@ -53,6 +53,30 @@ class OrdersService extends ApiService {
     return OrderModel.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Detalle de varias órdenes en una sola petición (POST /orders/batch).
+  /// [missing] son los IDs que ya no existen en el servidor (borradas/depuradas).
+  Future<({List<OrderModel> orders, List<int> missing})> getOrdersBatch(
+    List<int> ids, {
+    required String equipos,
+  }) async {
+    final data = await post(
+      ApiConfig.ordersBatch,
+      {'ids': ids, 'equipos': equipos},
+      timeout: const Duration(seconds: 30),
+    );
+    if (data is! Map<String, dynamic> || data['orders'] is! List) {
+      throw ApiException(statusCode: -1, message: 'Respuesta invalida del servidor en /orders/batch');
+    }
+    final orders = (data['orders'] as List)
+        .map((e) => OrderModel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final missing = (data['missing'] is List ? data['missing'] as List : const [])
+        .map((e) => int.tryParse(e.toString()) ?? 0)
+        .where((id) => id > 0)
+        .toList();
+    return (orders: orders, missing: missing);
+  }
+
   /// Obtiene solo la dirección de una orden directamente de la tabla,
   /// sin filtro de equipo — para geocodificar en el mapa.
   Future<OrderModel> getOrderAddress(int id) async {
