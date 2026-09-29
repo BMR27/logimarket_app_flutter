@@ -23,6 +23,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Requerido por Google Navigation SDK con minSdk < 34
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -73,4 +75,14 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// El Navigation SDK ya incluye el SDK de Google Maps: se excluye la copia de
+// play-services-maps (que trae google_maps_flutter) para evitar clases duplicadas.
+configurations.all {
+    exclude(group = "com.google.android.gms", module = "play-services-maps")
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 }

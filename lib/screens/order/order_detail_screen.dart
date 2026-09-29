@@ -20,6 +20,9 @@ import '../../services/background_location_task.dart';
 import '../../services/orders_service.dart';
 import '../../services/location_tracking_service.dart';
 import 'delivery_evidence_screen.dart';
+import 'pin_adjust_screen.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
+import '../../services/geo_service.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
@@ -1046,6 +1049,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 text: order.fullAddressDetailed,
                 initiallyExpanded: true,
                 onOpenCoords: _openCoords,
+              ),
+              // Corregir el punto exacto de entrega (queda guardado para todos)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: TextButton.icon(
+                  icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                  label: const Text('Ajustar ubicación en el mapa'),
+                  onPressed: () {
+                    final lat = double.tryParse((order.latitud ?? '').replaceAll(',', '.'));
+                    final lng = double.tryParse((order.longitud ?? '').replaceAll(',', '.'));
+                    final inicial = GeoService.pinesCorregidos.value[order.id] ??
+                        (lat != null && lng != null && lat != 0 && lng != 0 ? LatLng(lat, lng) : null);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PinAdjustScreen(
+                          orderId: order.id,
+                          folio: order.folioOrdenCliente,
+                          direccion: order.fullAddress,
+                          inicial: inicial,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
               if (_enViaje)
                 Padding(

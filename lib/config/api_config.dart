@@ -26,6 +26,18 @@ class ApiConfig {
   /// Detalle de varias órdenes en una sola petición (carga de la mochila).
   static const String ordersBatch = '$baseUrl/orders/batch';
   static String orderGeocode(int id) => '$baseUrl/orders/$id/geocode';
+  // Mapas: geocodificación, búsqueda de direcciones y rutas se resuelven en el
+  // servidor con Google (la clave de servidor nunca viaja a la app).
+  static const String ordersGeocodeBatch = '$baseUrl/orders/geocode/batch';
+  static String geoAutocomplete({required String q, required String sessionToken, double? lat, double? lng}) =>
+      '$baseUrl/geo/autocomplete?q=${Uri.encodeComponent(q)}&sessionToken=${Uri.encodeComponent(sessionToken)}'
+      '${lat != null && lng != null ? '&lat=$lat&lng=$lng' : ''}';
+  static String geoPlace(String placeId, {required String sessionToken}) =>
+      '$baseUrl/geo/place/${Uri.encodeComponent(placeId)}?sessionToken=${Uri.encodeComponent(sessionToken)}';
+  static String geoReverse(double lat, double lng) => '$baseUrl/geo/reverse?lat=$lat&lng=$lng';
+  static const String geoRoute = '$baseUrl/geo/route';
+  /// Map ID de Google Cloud (estilo vectorial del mapa). Opcional: --dart-define=MAPS_MAP_ID=...
+  static const String mapsMapId = String.fromEnvironment('MAPS_MAP_ID', defaultValue: '');
   static String updateOrder(int id) => '$baseUrl/orders/$id';
   static String orderNotes(int id) => '$baseUrl/orders/$id/notes';
   static String orderPriceRequest(int id) => '$baseUrl/orders/$id/price-request';

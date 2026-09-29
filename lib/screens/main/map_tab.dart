@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart' as geo;
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,8 +14,11 @@ import '../../providers/backpacks_provider.dart';
 import '../../models/order_model.dart';
 import '../../models/backpack_item_model.dart';
 import '../../services/orders_service.dart';
+import '../../services/geo_service.dart';
+import '../../services/api_service.dart';
 import '../../config/api_config.dart';
 import '../order/order_detail_screen.dart';
+import 'turn_by_turn_screen.dart';
 class MapTab extends StatefulWidget {
   const MapTab({super.key});
 
@@ -44,11 +46,6 @@ class _MapTabState extends State<MapTab> {
   String? _lastAddressDumpKey;
   int _coordResolvedCount = 0;
   int _coordFailedCount = 0;
-  // Muchos dispositivos (Xiaomi/Huawei/etc.) no tienen Play Services: el
-  // geocodificador nativo nunca responde y solo agrega ~4s de espera por
-  // cada intento. Tras un primer fallo se desactiva para el resto de la
-  // sesión y se va directo a los respaldos HTTP.
-  bool _nativeGeocoderUnavailable = false;
   // Nominatim exige max. 1 solicitud/segundo; si se golpea en paralelo la IP
   // puede quedar bloqueada y entonces NINGÚN puntero se resuelve. Esta cola
   // serializa esas llamadas sin bloquear el resto de la resolución en paralelo.
@@ -60,6 +57,61 @@ class _MapTabState extends State<MapTab> {
   final Map<String, Future<LatLng?>> _cpAnchorCache = {};
   static const double _maxKmFromCpAnchor = 10;
   final Set<int> _persistedGeocodeOrderIds = <int>{};
+
+  // Puntos resueltos en el servidor (Google, validado contra el CP). null = aún no se
+  // sabe si el servidor tiene el endpoint; false = API anterior → se usa la
+  // geocodificación en el celular de siempre como respaldo.
+  final _geoService = GeoService();
+  bool? _serverGeocode;
+  bool _resolvingFromServer = false;
+  final Set<int> _serverAskedIds = <int>{};
+  final Map<int, String> _precisionByOrderId = {};
+  static const _clusterId = ClusterManagerId('ordenes');
+
+  /// Pide al servidor los puntos de [ids] (los guardados y los que falten, que el
+  /// servidor geocodifica). Cada id se pide una sola vez por sesión, salvo los que el
+  /// servidor deje pendientes. Devuelve false si el servidor no soporta el endpoint.
+  Future<bool> _resolveFromServer(Iterable<int> ids) async {
+    if (_serverGeocode == false) return false;
+    final nuevos = ids.where((id) => id > 0 && !_serverAskedIds.contains(id)).toSet().toList();
+    if (nuevos.isEmpty || _resolvingFromServer) return true;
+    _resolvingFromServer = true;
+    _serverAskedIds.addAll(nuevos);
+    try {
+      var porPedir = nuevos;
+      for (var vuelta = 0; vuelta < 6 && porPedir.isNotEmpty; vuelta++) {
+        final r = await _geoService.puntosDeOrdenes(porPedir);
+        _serverGeocode = true;
+        r.puntos.forEach((id, punto) {
+          _derivedCoordsByOrderId[id] = punto.posicion;
+          _precisionByOrderId[id] = punto.precision;
+          _persistedGeocodeOrderIds.add(id); // ya está guardado en el servidor
+        });
+        if (mounted) setState(() {});
+        porPedir = r.pendientes;
+      }
+      return true;
+    } on ApiException catch (e) {
+      // 404: API anterior sin el endpoint → respaldo en el celular
+      if (e.statusCode == 404) {
+        _serverGeocode = false;
+        return false;
+      }
+      _serverAskedIds.removeAll(nuevos); // error temporal: reintentar en otra vuelta
+      return true;
+    } catch (_) {
+      _serverAskedIds.removeAll(nuevos);
+      return true;
+    } finally {
+      _resolvingFromServer = false;
+    }
+  }
+
+  /// Texto e ícono según qué tan confiable es el punto de la orden.
+  bool _esAproximado(int orderId) {
+    final p = _precisionByOrderId[orderId];
+    return p == 'cp' || p == 'colonia';
+  }
 
   // Guarda el punto en el backend para que la orden no se vuelva a geocodificar
   // en ningún celular. Dispara y olvida: nunca se espera ni bloquea el mapa, y
@@ -110,6 +162,20 @@ class _MapTabState extends State<MapTab> {
   void initState() {
     super.initState();
     _requestLocationPermission();
+    GeoService.pinesCorregidos.addListener(_onPinCorregido);
+  }
+
+  void _onPinCorregido() {
+    GeoService.pinesCorregidos.value.forEach((id, p) {
+      _precisionByOrderId[id] = 'manual';
+    });
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    GeoService.pinesCorregidos.removeListener(_onPinCorregido);
+    super.dispose();
   }
 
   Future<bool> _showForegroundLocationDisclosure() async {
@@ -213,8 +279,9 @@ class _MapTabState extends State<MapTab> {
   void _startLocationUpdates() {
     Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
+        // 5 m: la cámara de navegación se mueve más fluido sin gastar batería de más
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        distanceFilter: 5,
       ),
     ).listen((pos) {
       if (!mounted) return;
@@ -252,10 +319,12 @@ class _MapTabState extends State<MapTab> {
   }
 
   void _animateNavCamera(Position pos, LatLng destination) {
-    final bearing = _bearing(
-      pos.latitude, pos.longitude,
-      destination.latitude, destination.longitude,
-    );
+    // En movimiento la cámara sigue el rumbo real del vehículo (como Uber); parado o
+    // sin rumbo válido, apunta al destino.
+    final enMovimiento = pos.speed >= 2 && pos.heading >= 0 && pos.heading <= 360;
+    final bearing = enMovimiento
+        ? pos.heading
+        : _bearing(pos.latitude, pos.longitude, destination.latitude, destination.longitude);
     _mapController!.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(
@@ -532,6 +601,9 @@ class _MapTabState extends State<MapTab> {
   ) async {
     if (_resolvingMissingCoords) return;
 
+    // Primero el servidor (toda la mochila de una vez, con precisión por punto)
+    if (await _resolveFromServer(items.map((i) => i.idOrdenVenta))) return;
+
     final orderById = <int, OrderModel>{
       for (final o in allOrders) o.id: o,
     };
@@ -667,6 +739,7 @@ class _MapTabState extends State<MapTab> {
     Map<int, LatLng> coordsByOrderId,
   ) async {
     if (_resolvingMissingOrderCoords) return;
+    if (await _resolveFromServer(orders.map((o) => o.id))) return;
 
     List<OrderModel> buildMissingBatch() {
       final now = DateTime.now();
@@ -785,25 +858,9 @@ class _MapTabState extends State<MapTab> {
   /// fuera de [_maxKmFromCpAnchor] km se descarta y se prueba el siguiente.
   Future<LatLng?> _geocodeAddress(String query, {LatLng? anchor}) async {
     try {
-      // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma).
-      // Sin Play Services (común en Xiaomi/Huawei/etc.) esta llamada puede
-      // colgarse mucho tiempo sin fallar — con timeout cae rápido al respaldo HTTP,
-      // y tras el primer fallo se desactiva para el resto de la sesión.
-      if (!_nativeGeocoderUnavailable) {
-        try {
-          final locations = await geo
-              .locationFromAddress(query)
-              .timeout(const Duration(seconds: 4));
-          for (final loc in locations) {
-            if (_isAcceptableGeocode(loc.latitude, loc.longitude, anchor)) {
-              return LatLng(loc.latitude, loc.longitude);
-            }
-          }
-        } catch (_) {
-          // Fallback a proveedores HTTP; no reintentar el nativo esta sesión.
-          _nativeGeocoderUnavailable = true;
-        }
-      }
+      // El geocodificador nativo del teléfono se quitó: es el menos preciso y en
+      // muchos equipos sin Play Services ni responde. Este respaldo solo se usa si el
+      // servidor todavía no tiene la geocodificación (ver _resolveFromServer).
 
       // 2) Google Geocoding API (si hay key disponible)
       final googleKey = ApiConfig.mapsApiKey.trim();
@@ -874,16 +931,20 @@ class _MapTabState extends State<MapTab> {
           : null;
       // Si la orden no trae coordenada directa, usar la resuelta por
       // geocodificación (misma que ya se calcula para las mochilas en ruta).
-      final basePos = directPos ??
+      final basePos = GeoService.pinesCorregidos.value[o.id] ??
+          directPos ??
           coordsByOrderId[o.id] ??
           coordsByFolio[o.folioOrdenCliente.trim()];
       if (basePos == null) return null;
+      final aprox = _esAproximado(o.id);
       return Marker(
         markerId: MarkerId('order_${o.id}'),
         position: basePos,
+        clusterManagerId: destination == null ? _clusterId : null,
+        icon: aprox ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange) : BitmapDescriptor.defaultMarker,
         infoWindow: InfoWindow(
           title: o.folioOrdenCliente,
-          snippet: o.cliente,
+          snippet: aprox ? '${o.cliente} · Ubicación aproximada: confírmala' : o.cliente,
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
@@ -929,7 +990,7 @@ class _MapTabState extends State<MapTab> {
           : null;
       final fallback =
           coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
-      final basePos = directPos ?? fallback;
+      final basePos = GeoService.pinesCorregidos.value[i.idOrdenVenta] ?? directPos ?? fallback;
       if (basePos == null) continue;
       basePositions.add(basePos);
       final key =
@@ -966,7 +1027,7 @@ class _MapTabState extends State<MapTab> {
           : null;
       final fallback =
           coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
-      final basePos = directPos ?? fallback;
+      final basePos = GeoService.pinesCorregidos.value[i.idOrdenVenta] ?? directPos ?? fallback;
       final isFallbackWithoutCoords = basePos == null;
 
       late final LatLng markerPos;
@@ -989,16 +1050,24 @@ class _MapTabState extends State<MapTab> {
             : basePos;
       }
 
+      final aprox = !isFallbackWithoutCoords && _esAproximado(i.idOrdenVenta);
       final detailSnippet = [
         i.nombreCliente.trim(),
         'Mochila ${i.idBackpack}',
         i.statusName.trim(),
         if (isFallbackWithoutCoords) 'Coordenada pendiente',
+        if (aprox) 'Ubicación aproximada: confírmala',
       ].where((v) => v.isNotEmpty).join(' | ');
 
       return Marker(
         markerId: MarkerId('bp_item_${i.idBackpackItem}'),
         position: markerPos,
+        clusterManagerId: destination == null ? _clusterId : null,
+        icon: isFallbackWithoutCoords
+            ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet)
+            : aprox
+                ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange)
+                : BitmapDescriptor.defaultMarker,
         infoWindow: InfoWindow(
           title: '${i.folioOrden} (OV ${i.idOrdenVenta})',
           snippet: detailSnippet,
@@ -1154,7 +1223,13 @@ class _MapTabState extends State<MapTab> {
     final activeBackpackItems = pendingBackpackItems
         .where((i) => _isBackpackItemActiveInRoute(i, statusByOrderId))
         .toList();
-    final filteredOutCount = pendingBackpackItems.length - activeBackpackItems.length;
+    // Precisión (y punto) de todos los pines visibles, una sola vez por orden
+    final idsVisibles = !isAdmin && activeBackpackItems.isNotEmpty
+        ? activeBackpackItems.map((i) => i.idOrdenVenta)
+        : orders.map((o) => o.id);
+    if (_serverGeocode != false && idsVisibles.any((id) => id > 0 && !_serverAskedIds.contains(id))) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _resolveFromServer(idsVisibles));
+    }
 
     if (!isAdmin && hasEnRutaBackpack && pendingBackpackItems.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1287,7 +1362,18 @@ class _MapTabState extends State<MapTab> {
       children: [
         GoogleMap(
           initialCameraPosition: _initialCamera,
+          // Estilo vectorial de Google Cloud (opcional, --dart-define=MAPS_MAP_ID)
+          mapId: ApiConfig.mapsMapId.isEmpty ? null : ApiConfig.mapsMapId,
           markers: _markers,
+          // Muchos pines se agrupan en burbujas con el número; al acercarse se separan
+          clusterManagers: {
+            ClusterManager(
+              clusterManagerId: _clusterId,
+              onClusterTap: (cluster) => _mapController?.animateCamera(
+                CameraUpdate.newLatLngBounds(cluster.bounds, 60),
+              ),
+            ),
+          },
           polylines: polylines,
           myLocationEnabled: _currentPosition != null,
           myLocationButtonEnabled: false,
@@ -1378,9 +1464,28 @@ class _MapTabState extends State<MapTab> {
             bottom: 0,
             child: _NavigationPanel(
               mapNav: mapNav,
-              onStart: () {
-                context.read<MapNavigationProvider>().startNavigation();
-                _zoomToUserOnTripStart(mapNav.destination);
+              onStart: () async {
+                // Navegación por voz de Google dentro de la app; si no llega (se sale o el
+                // Navigation SDK no está disponible), sigue el modo de seguimiento anterior.
+                final dest = mapNav.destination!;
+                final navProvider = context.read<MapNavigationProvider>();
+                final llego = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TurnByTurnScreen(
+                      lat: dest.latitude,
+                      lng: dest.longitude,
+                      titulo: mapNav.destinationAddress ?? 'Destino',
+                    ),
+                  ),
+                );
+                if (!mounted) return;
+                if (llego == true) {
+                  navProvider.clearRoute();
+                } else {
+                  navProvider.startNavigation();
+                  _zoomToUserOnTripStart(dest);
+                }
               },
               onStop: () => context.read<MapNavigationProvider>().clearRoute(),
               onRecenter: () {

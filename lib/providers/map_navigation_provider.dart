@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../services/geo_service.dart';
 
 class MapNavigationProvider extends ChangeNotifier {
   LatLng? _destination;
@@ -68,6 +69,26 @@ class MapNavigationProvider extends ChangeNotifier {
 
     var hasRealRoute = false;
     try {
+      // 1) Servidor: Routes API de Google con tráfico en tiempo real (la clave vive
+      //    en el servidor). Si no está disponible, se usan las rutas de siempre.
+      try {
+        final r = await GeoService().ruta(origin, destination);
+        if (r.puntos.isNotEmpty) {
+          _routePoints = r.puntos;
+          _distanceMeters = r.distanciaMetros;
+          _durationSeconds = r.duracionSegundos;
+          hasRealRoute = true;
+        }
+      } catch (_) {
+        // Cae a los respaldos de abajo.
+      }
+      if (hasRealRoute) {
+        _loading = false;
+        _started = false;
+        notifyListeners();
+        return;
+      }
+
       final googleByAddressOk = await _loadRouteFromGoogleDirectionsByAddress(
         origin,
         destinationQuery,

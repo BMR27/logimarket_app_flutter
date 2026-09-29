@@ -92,11 +92,15 @@ class OrdersService extends ApiService {
     required double latitud,
     required double longitud,
     required String precision,
+    String? direccion,
+    String? placeId,
   }) async {
     await put(ApiConfig.orderGeocode(idOrden), {
       'latitud': latitud,
       'longitud': longitud,
       'precision': precision,
+      if (direccion != null) 'direccion': direccion,
+      if (placeId != null) 'placeId': placeId,
     });
   }
 
