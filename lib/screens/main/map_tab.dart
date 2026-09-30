@@ -1176,13 +1176,21 @@ class _MapTabState extends State<MapTab> {
       });
     }
 
-    if (!isAdmin && activeBackpackItems.isNotEmpty) {
-      _buildBackpackMarkers(
-        activeBackpackItems,
-        mapNav.destination,
-        coordsByOrderId,
-        coordsByFolio,
-      );
+    // El mensajero solo ve en el mapa las órdenes de su mochila "En Ruta".
+    // Sin mochila en ruta (o ya todo entregado) no se muestran órdenes: antes
+    // caía a la vista general y veía todas las órdenes de su equipo.
+    final sinMochilaEnRuta = !isAdmin && activeBackpackItems.isEmpty;
+    if (!isAdmin) {
+      if (activeBackpackItems.isNotEmpty) {
+        _buildBackpackMarkers(
+          activeBackpackItems,
+          mapNav.destination,
+          coordsByOrderId,
+          coordsByFolio,
+        );
+      } else {
+        _buildMarkers(const [], mapNav.destination, coordsByOrderId, coordsByFolio);
+      }
     } else {
       _buildMarkers(orders, mapNav.destination, coordsByOrderId, coordsByFolio);
 
@@ -1407,7 +1415,9 @@ class _MapTabState extends State<MapTab> {
                 ],
               ),
               child: Text(
-                '${_markers.length} en mapa',
+                sinMochilaEnRuta && _markers.isEmpty
+                    ? 'Sin mochila en ruta'
+                    : '${_markers.length} en mapa',
                 style: const TextStyle(
                     fontSize: 12, fontWeight: FontWeight.w600),
               ),
