@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
@@ -26,7 +27,9 @@ class LocationTrackingService {
   int? get activeOrderId => _idOrden;
   String? get activeOrderFolio => _folioOrden;
 
-  static const int intervalSeconds = 10;
+  // Cada tick manda por lote los puntos juntados por el stream de GPS
+  // (background_location_task.dart); el GPS en sí no depende de este intervalo.
+  static const int intervalSeconds = 15;
 
   // ── Inicialización (llamar una sola vez en main) ─────────────────────────
   static void init() {
@@ -79,10 +82,19 @@ class LocationTrackingService {
     required bool enViaje,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    // Otro mensajero en el mismo celular: sus puntos pendientes no son de este
+    if (prefs.getInt(kPrefsMensajero) != null && prefs.getInt(kPrefsMensajero) != idMensajero) {
+      await prefs.remove(kPrefsColaPuntos);
+    }
     await prefs.setInt(kPrefsMensajero, idMensajero);
     await prefs.setString(kPrefsToken,  token);
     await prefs.setString(kPrefsApiUrl, ApiConfig.ubicacion);
     await prefs.setBool(kPrefsEnViaje,  enViaje);
+    try {
+      await prefs.setString(kPrefsAppVersion, (await PackageInfo.fromPlatform()).version);
+    } catch (_) {
+      // Solo sirve para diagnóstico en la web; no bloquea el rastreo
+    }
     if (idOrden != null) {
       await prefs.setInt(kPrefsIdOrden, idOrden);
     } else {
@@ -182,13 +194,23 @@ class LocationTrackingService {
       final idOrden = prefs.getInt(kPrefsIdOrden);
       final enViaje = prefs.getBool(kPrefsEnViaje) ?? false;
       if (apiUrl == null) return;
+      final permiso = await Geolocator.checkPermission();
+      final appVersion = prefs.getString(kPrefsAppVersion);
       final body = <String, dynamic>{
         'idMensajero': idMensajero,
-        'latitud':     pos.latitude,
-        'longitud':    pos.longitude,
-        'accuracy':    pos.accuracy,
         'enViaje':     enViaje,
         if (idOrden != null) 'idOrden': idOrden,
+        'permiso':     permiso.name,
+        'plataforma':  defaultTargetPlatform.name.toLowerCase(),
+        if (appVersion != null) 'appVersion': appVersion,
+        'puntos': [
+          {
+            'latitud':     pos.latitude,
+            'longitud':    pos.longitude,
+            'accuracy':    pos.accuracy,
+            'capturadoEn': pos.timestamp.millisecondsSinceEpoch,
+          },
+        ],
       };
       await http.post(
         Uri.parse(apiUrl),
@@ -251,6 +273,7 @@ class LocationTrackingService {
     await prefs.remove(kPrefsFolioOrden);
     await prefs.remove(kPrefsEnViaje);
     await prefs.remove(kPrefsApiUrl);
+    await prefs.remove(kPrefsColaPuntos);
 
     // Borrar del backend para que desaparezca del mapa de inmediato
     if (idMensajero != null && token != null && apiUrl != null) {
