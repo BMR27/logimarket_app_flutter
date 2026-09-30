@@ -164,11 +164,26 @@ class LocationTrackingService {
     unawaited(_sendImmediatePing(idMensajero: idMensajero, token: token));
   }
 
-  Future<void> _requestBatteryOptimizationExemption() async {
+  // flutter_foreground_task 8.x guarda la respuesta de esta petición por código y
+  // no la libera: si hay dos peticiones encimadas, al volver del diálogo responde
+  // dos veces y Android cierra la app ("Reply already submitted"). Por eso nunca
+  // se hacen dos a la vez y, si el mensajero no aceptó, no se insiste en todo el día.
+  static Future<void>? _bateriaEnCurso;
+  static const String _kPrefsBateriaPreguntadaEn = 'battery_optimization_asked_at';
+
+  Future<void> _requestBatteryOptimizationExemption() {
+    return _bateriaEnCurso ??= _pedirExencionBateria().whenComplete(() => _bateriaEnCurso = null);
+  }
+
+  Future<void> _pedirExencionBateria() async {
     try {
-      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      }
+      if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) return;
+      final prefs = await SharedPreferences.getInstance();
+      final ultima = prefs.getInt(_kPrefsBateriaPreguntadaEn);
+      final ahora = DateTime.now().millisecondsSinceEpoch;
+      if (ultima != null && ahora - ultima < const Duration(hours: 24).inMilliseconds) return;
+      await prefs.setInt(_kPrefsBateriaPreguntadaEn, ahora);
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
     } catch (e) {
       debugPrint('[LocationTracking] battery optimization request error: $e');
     }

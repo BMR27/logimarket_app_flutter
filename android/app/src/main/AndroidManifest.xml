@@ -54,21 +54,22 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs" />
 
-        <!-- Foreground service para rastreo de ubicación en segundo plano -->
-        <!-- stopWithTask=true: el servicio se detiene al cerrar la app desde recientes -->
+        <!-- Foreground service para rastreo de ubicación en segundo plano.
+             El nombre debe ser exactamente el de la clase de flutter_foreground_task 8.x
+             (service.ForegroundService); con otro nombre Android no encuentra el servicio
+             y el rastreo en segundo plano nunca arranca.
+             stopWithTask=true: se detiene al cerrar la app desde recientes y el plugin no
+             programa reinicios desde segundo plano (en Android 14+ un servicio de ubicación
+             arrancado en segundo plano cierra la app). -->
         <service
-            android:name="com.pravera.flutter_foreground_task.service.ForegroundTaskService"
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="location"
             android:exported="false"
             android:stopWithTask="true" />
-        <receiver
-            android:name="com.pravera.flutter_foreground_task.receiver.TaskStartReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
+        <!-- El arranque al encender el celular/actualizar lo maneja el RebootReceiver
+             del propio plugin (desactivado con autoRunOnBoot: false). Aquí había un
+             receptor de una versión vieja del plugin (receiver.TaskStartReceiver) que
+             ya no existe: Android fallaba con ClassNotFoundException al invocarlo. -->
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
