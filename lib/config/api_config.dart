@@ -52,12 +52,16 @@ class ApiConfig {
   static const String motivosStatus = '$baseUrl/catalogs/motivos-status';
   static const String explicacionesMotivo = '$baseUrl/catalogs/explicaciones-motivo';
   static const String adminReset = '$baseUrl/admin/reset';
-    static const String mapsApiKey = 'AIzaSyBzIkJJsRkfTOYOvlaoaAx-0nveVOvwMgs';
     static String orderEvidencia(int id) => '$baseUrl/orders/$id/evidencia';
 
   // Ubicación en tiempo real
   static const String ubicacion = '$baseUrl/ubicacion';
   static String ubicacionMensajero(int id) => '$baseUrl/ubicacion/$id';
+
+  // Mapas (HERE en el servidor; la key no va en la app)
+  static String geoRuta(double oLat, double oLng, double dLat, double dLng) =>
+      '$baseUrl/geo/ruta?origen=$oLat,$oLng&destino=$dLat,$dLng';
+  static String geoCp(String cp) => '$baseUrl/geo/cp/$cp';
 
   // Mensajes WhatsApp (aviso de entrega / encuesta de satisfacción)
   static String orderMensajes(int id) => '$baseUrl/orders/$id/mensajes';

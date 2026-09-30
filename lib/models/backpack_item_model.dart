@@ -1,3 +1,5 @@
+import 'order_model.dart' show esUbicacionAproximada;
+
 class BackpackItemModel {
   final int idBackpack;
   final int idBackpackItem;
@@ -9,6 +11,8 @@ class BackpackItemModel {
   final int validation;
   final String? latitud;
   final String? longitud;
+  /// Precisión del punto guardado (ver OrderModel.precisionUbicacion).
+  final String? precisionUbicacion;
   final String? calle;
   final String? numExterior;
   final String? colonia;
@@ -27,6 +31,7 @@ class BackpackItemModel {
     required this.validation,
     this.latitud,
     this.longitud,
+    this.precisionUbicacion,
     this.calle,
     this.numExterior,
     this.colonia,
@@ -36,6 +41,8 @@ class BackpackItemModel {
   });
 
   bool get isValidated => validation == 1;
+
+  bool get ubicacionAproximada => esUbicacionAproximada(precisionUbicacion);
 
   // 1=Exitosa, 4=Cancelada: son resultados definitivos — no hay nada más que
   // "gestionar" en esa orden, así que cuentan aunque el mensajero no haya
@@ -89,6 +96,7 @@ class BackpackItemModel {
       ),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
+        precisionUbicacion: json['precisionUbicacion']?.toString(),
         calle: json['Calle']?.toString() ?? json['calle']?.toString(),
         numExterior: json['NumExterior']?.toString() ?? json['numExterior']?.toString(),
         colonia: json['Colonia']?.toString() ?? json['colonia']?.toString(),
@@ -108,6 +116,7 @@ class BackpackItemModel {
     'validation': validation,
     'latitud': latitud,
     'longitud': longitud,
+    'precisionUbicacion': precisionUbicacion,
     'calle': calle,
     'numExterior': numExterior,
     'colonia': colonia,

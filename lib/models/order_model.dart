@@ -30,6 +30,9 @@ class OrderModel {
   final String fechaReagendaProgramada;
   final String? latitud;
   final String? longitud;
+  /// Qué tan preciso es el punto guardado: exacta | interpolada | calle | zona
+  /// (HERE, en el servidor) o direccion | cp (geocodificado en el celular).
+  final String? precisionUbicacion;
   final String? metros;
   final String? tiempo;
 
@@ -65,9 +68,13 @@ class OrderModel {
     this.fechaReagendaProgramada = '',
     this.latitud,
     this.longitud,
+    this.precisionUbicacion,
     this.metros,
     this.tiempo,
   });
+
+  /// El pin cae en la calle, la colonia o el CP, no en el número exterior.
+  bool get ubicacionAproximada => esUbicacionAproximada(precisionUbicacion);
 
   String get fullAddress =>
       '$calle $numExterior, $colonia, $municipioDelegacion, $estado CP $codigoPostal';
@@ -128,6 +135,7 @@ class OrderModel {
       fechaReagendaProgramada: fechaReagendaProgramada ?? this.fechaReagendaProgramada,
       latitud: latitud ?? this.latitud,
       longitud: longitud ?? this.longitud,
+      precisionUbicacion: precisionUbicacion,
       metros: metros ?? this.metros,
       tiempo: tiempo ?? this.tiempo,
     );
@@ -176,6 +184,7 @@ class OrderModel {
         ),
         latitud: json['Latitud']?.toString() ?? json['latitud']?.toString(),
         longitud: json['Longitud']?.toString() ?? json['longitud']?.toString(),
+        precisionUbicacion: json['precisionUbicacion']?.toString(),
         metros: json['Metros']?.toString() ?? json['metros']?.toString(),
         tiempo: json['Tiempo']?.toString() ?? json['tiempo']?.toString(),
       );
@@ -199,3 +208,7 @@ class OrderModel {
     return value.toString();
   }
 }
+
+/// Niveles de precisión en los que el pin no está en el número exterior.
+bool esUbicacionAproximada(String? precision) =>
+    const {'calle', 'zona', 'cp'}.contains(precision);

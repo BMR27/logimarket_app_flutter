@@ -1053,9 +1053,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.directions, size: 18),
                     label: const Text('Cómo llegar'),
+                    // Con un punto aproximado (solo calle/colonia/CP), Waze y
+                    // Google Maps ubican mejor la dirección escrita.
                     onPressed: () => _showNavigationOptions(
-                      order.latitud,
-                      order.longitud,
+                      order.ubicacionAproximada ? null : order.latitud,
+                      order.ubicacionAproximada ? null : order.longitud,
                       order.fullAddress,
                     ),
                   ),

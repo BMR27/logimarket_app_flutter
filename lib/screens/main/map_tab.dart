@@ -15,7 +15,7 @@ import '../../providers/backpacks_provider.dart';
 import '../../models/order_model.dart';
 import '../../models/backpack_item_model.dart';
 import '../../services/orders_service.dart';
-import '../../config/api_config.dart';
+import '../../services/geo_service.dart';
 import '../order/order_detail_screen.dart';
 class MapTab extends StatefulWidget {
   const MapTab({super.key});
@@ -26,6 +26,7 @@ class MapTab extends StatefulWidget {
 
 class _MapTabState extends State<MapTab> {
   final _ordersService = OrdersService();
+  final _geoService = GeoService();
   GoogleMapController? _mapController;
   Position? _currentPosition;
   bool _followUser = true;
@@ -347,36 +348,13 @@ class _MapTabState extends State<MapTab> {
   }
 
   Future<LatLng?> _fetchCpAnchor(String cp) async {
-    final googleKey = ApiConfig.mapsApiKey.trim();
-    if (googleKey.isNotEmpty) {
-      try {
-        final uri = Uri.parse(
-          'https://maps.googleapis.com/maps/api/geocode/json'
-          '?components=${Uri.encodeComponent('postal_code:$cp|country:MX')}'
-          '&language=es&key=${Uri.encodeComponent(googleKey)}',
-        );
-        final resp = await http.get(uri).timeout(const Duration(seconds: 6));
-        if (resp.statusCode == 200) {
-          final data = jsonDecode(resp.body) as Map<String, dynamic>;
-          if ((data['status'] ?? '').toString() == 'OK') {
-            for (final r in (data['results'] as List? ?? const [])) {
-              final components = (r['address_components'] as List?) ?? const [];
-              final matchesCp = components.any((c) =>
-                  ((c['types'] as List?) ?? const []).contains('postal_code') &&
-                  (c['long_name'] ?? '').toString() == cp);
-              if (!matchesCp) continue;
-              final loc = r['geometry']?['location'] as Map<String, dynamic>?;
-              final lat = (loc?['lat'] as num?)?.toDouble();
-              final lng = (loc?['lng'] as num?)?.toDouble();
-              if (lat != null && lng != null && _isWithinMexico(lat, lng)) {
-                return LatLng(lat, lng);
-              }
-            }
-          }
-        }
-      } catch (_) {
-        // Cae a Nominatim.
+    try {
+      final centro = await _geoService.centroCp(cp);
+      if (centro != null && _isWithinMexico(centro.latitude, centro.longitude)) {
+        return centro;
       }
+    } catch (_) {
+      // Cae a Nominatim.
     }
 
     try {
@@ -781,8 +759,9 @@ class _MapTabState extends State<MapTab> {
     return candidates;
   }
 
-  /// [anchor] es el centro del CP de la orden; si se da, cualquier resultado
-  /// fuera de [_maxKmFromCpAnchor] km se descarta y se prueba el siguiente.
+  /// Solo para órdenes que el servidor no pudo ubicar con HERE (las demás ya
+  /// llegan con latitud/longitud). [anchor] es el centro del CP de la orden; si
+  /// se da, cualquier resultado fuera de [_maxKmFromCpAnchor] km se descarta.
   Future<LatLng?> _geocodeAddress(String query, {LatLng? anchor}) async {
     try {
       // 1) Geocodificador nativo del dispositivo (Google/Apple según plataforma).
@@ -800,42 +779,12 @@ class _MapTabState extends State<MapTab> {
             }
           }
         } catch (_) {
-          // Fallback a proveedores HTTP; no reintentar el nativo esta sesión.
+          // Fallback a Nominatim; no reintentar el nativo esta sesión.
           _nativeGeocoderUnavailable = true;
         }
       }
 
-      // 2) Google Geocoding API (si hay key disponible)
-      final googleKey = ApiConfig.mapsApiKey.trim();
-      if (googleKey.isNotEmpty) {
-        final googleUri = Uri.parse(
-          'https://maps.googleapis.com/maps/api/geocode/json'
-          '?address=${Uri.encodeComponent(query)}&components=country:MX&region=mx&language=es&key=${Uri.encodeComponent(googleKey)}',
-        );
-
-        try {
-          final googleResp = await http.get(googleUri).timeout(const Duration(seconds: 6));
-          if (googleResp.statusCode == 200) {
-            final googleData = jsonDecode(googleResp.body) as Map<String, dynamic>;
-            final status = (googleData['status'] ?? '').toString();
-            if (status == 'OK') {
-              final results = (googleData['results'] as List?) ?? const [];
-              for (final result in results) {
-                final location = (result['geometry']?['location']) as Map<String, dynamic>?;
-                final lat = (location?['lat'] as num?)?.toDouble();
-                final lng = (location?['lng'] as num?)?.toDouble();
-                if (lat != null && lng != null && _isAcceptableGeocode(lat, lng, anchor)) {
-                  return LatLng(lat, lng);
-                }
-              }
-            }
-          }
-        } catch (_) {
-          // Cae al respaldo de Nominatim en vez de abortar toda la búsqueda.
-        }
-      }
-
-      // 3) Nominatim como último respaldo. Se serializa (máx. 1 req/seg) para
+      // 2) Nominatim como último respaldo. Se serializa (máx. 1 req/seg) para
       // no violar su política de uso — de lo contrario la IP puede quedar
       // bloqueada y entonces ningún puntero llega a resolverse.
       final uri = Uri.parse(
@@ -878,12 +827,16 @@ class _MapTabState extends State<MapTab> {
           coordsByOrderId[o.id] ??
           coordsByFolio[o.folioOrdenCliente.trim()];
       if (basePos == null) return null;
+      final aproximada = directPos != null && o.ubicacionAproximada;
       return Marker(
         markerId: MarkerId('order_${o.id}'),
         position: basePos,
+        icon: aproximada ? _iconoAproximado : BitmapDescriptor.defaultMarker,
         infoWindow: InfoWindow(
           title: o.folioOrdenCliente,
-          snippet: o.cliente,
+          snippet: [o.cliente, if (aproximada) _textoAproximado]
+              .where((v) => v.trim().isNotEmpty)
+              .join(' | '),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
@@ -968,6 +921,7 @@ class _MapTabState extends State<MapTab> {
           coordsByOrderId[i.idOrdenVenta] ?? coordsByFolio[i.folioOrden.trim()];
       final basePos = directPos ?? fallback;
       final isFallbackWithoutCoords = basePos == null;
+      final aproximada = directPos != null && i.ubicacionAproximada;
 
       late final LatLng markerPos;
       if (isFallbackWithoutCoords) {
@@ -994,11 +948,13 @@ class _MapTabState extends State<MapTab> {
         'Mochila ${i.idBackpack}',
         i.statusName.trim(),
         if (isFallbackWithoutCoords) 'Coordenada pendiente',
+        if (aproximada) _textoAproximado,
       ].where((v) => v.isNotEmpty).join(' | ');
 
       return Marker(
         markerId: MarkerId('bp_item_${i.idBackpackItem}'),
         position: markerPos,
+        icon: aproximada ? _iconoAproximado : BitmapDescriptor.defaultMarker,
         infoWindow: InfoWindow(
           title: '${i.folioOrden} (OV ${i.idOrdenVenta})',
           snippet: detailSnippet,
@@ -1022,6 +978,12 @@ class _MapTabState extends State<MapTab> {
       ));
     }
   }
+
+  // Pin naranja: el servidor solo encontró la calle, la colonia o el CP, no el
+  // número exterior. El mensajero debe confirmar la dirección al llegar.
+  static final BitmapDescriptor _iconoAproximado =
+      BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+  static const String _textoAproximado = 'Ubicación aproximada';
 
   LatLng _offsetOverlappingPin(LatLng base, int groupIndex, int groupSize) {
     if (groupSize <= 1 || groupIndex < 0) return base;

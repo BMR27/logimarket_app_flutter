@@ -3,9 +3,10 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-import '../config/api_config.dart';
+import '../services/geo_service.dart';
 
 class MapNavigationProvider extends ChangeNotifier {
+  final GeoService _geoService = GeoService();
   LatLng? _destination;
   LatLng? _origin;
   List<LatLng> _routePoints = [];
@@ -54,7 +55,6 @@ class MapNavigationProvider extends ChangeNotifier {
     LatLng destination,
     LatLng origin, {
     String? address,
-    String? destinationQuery,
   }) async {
     _destination = destination;
     _origin = origin;
@@ -68,22 +68,9 @@ class MapNavigationProvider extends ChangeNotifier {
 
     var hasRealRoute = false;
     try {
-      final googleByAddressOk = await _loadRouteFromGoogleDirectionsByAddress(
-        origin,
-        destinationQuery,
-      );
-
-      if (googleByAddressOk) {
-        hasRealRoute = true;
-      } else {
-        final googleByCoordsOk = await _loadRouteFromGoogleDirections(origin, destination);
-        if (googleByCoordsOk) {
-          hasRealRoute = true;
-        } else {
-          final osrmOk = await _loadRouteFromOsrm(origin, destination);
-          hasRealRoute = osrmOk;
-        }
-      }
+      // HERE vía logimarket-api; OSRM público como respaldo.
+      hasRealRoute = await _loadRouteFromBackend(origin, destination) ||
+          await _loadRouteFromOsrm(origin, destination);
     } catch (_) {
       hasRealRoute = false;
     }
@@ -98,6 +85,19 @@ class MapNavigationProvider extends ChangeNotifier {
     _loading = false;
     _started = false;
     notifyListeners();
+  }
+
+  Future<bool> _loadRouteFromBackend(LatLng origin, LatLng destination) async {
+    try {
+      final ruta = await _geoService.ruta(origin, destination);
+      if (ruta == null) return false;
+      _routePoints = ruta.puntos;
+      _distanceMeters = ruta.distanciaMetros;
+      _durationSeconds = ruta.duracionSegundos;
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> _loadRouteFromOsrm(LatLng origin, LatLng destination) async {
@@ -187,113 +187,6 @@ class MapNavigationProvider extends ChangeNotifier {
     final h = sin(dLat / 2) * sin(dLat / 2) +
         cos(la1) * cos(la2) * sin(dLng / 2) * sin(dLng / 2);
     return 2 * r * atan2(sqrt(h), sqrt(1 - h));
-  }
-
-  Future<bool> _loadRouteFromGoogleDirections(LatLng origin, LatLng destination) async {
-    final key = ApiConfig.mapsApiKey.trim();
-    if (key.isEmpty) return false;
-
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${origin.latitude},${origin.longitude}'
-        '&destination=${destination.latitude},${destination.longitude}'
-        '&mode=driving&language=es&region=mx&key=${Uri.encodeComponent(key)}',
-      );
-
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
-      if (response.statusCode != 200) return false;
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final status = (data['status'] ?? '').toString();
-      if (status != 'OK') {
-        _routeError = _googleStatusToMessage(status);
-        return false;
-      }
-
-      final routes = (data['routes'] as List?) ?? const [];
-      if (routes.isEmpty) return false;
-      final route = routes.first as Map<String, dynamic>;
-
-      final overview = route['overview_polyline'] as Map<String, dynamic>?;
-      final points = (overview?['points'] ?? '').toString();
-      if (points.isEmpty) return false;
-
-      final legs = (route['legs'] as List?) ?? const [];
-      if (legs.isNotEmpty) {
-        final firstLeg = legs.first as Map<String, dynamic>;
-        _distanceMeters = (firstLeg['distance']?['value'] as num?)?.toDouble();
-        _durationSeconds = (firstLeg['duration']?['value'] as num?)?.toInt();
-      }
-
-      _routePoints = _decodePolyline(points);
-      return _routePoints.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> _loadRouteFromGoogleDirectionsByAddress(
-    LatLng origin,
-    String? destinationQuery,
-  ) async {
-    final key = ApiConfig.mapsApiKey.trim();
-    final query = destinationQuery?.trim() ?? '';
-    if (key.isEmpty || query.isEmpty) return false;
-
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${origin.latitude},${origin.longitude}'
-        '&destination=${Uri.encodeComponent(query)}'
-        '&mode=driving&language=es&region=mx&key=${Uri.encodeComponent(key)}',
-      );
-
-      final response = await http.get(url).timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200) return false;
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final status = (data['status'] ?? '').toString();
-      if (status != 'OK') {
-        _routeError = _googleStatusToMessage(status);
-        return false;
-      }
-
-      final routes = (data['routes'] as List?) ?? const [];
-      if (routes.isEmpty) return false;
-      final route = routes.first as Map<String, dynamic>;
-
-      final overview = route['overview_polyline'] as Map<String, dynamic>?;
-      final points = (overview?['points'] ?? '').toString();
-      if (points.isEmpty) return false;
-
-      final legs = (route['legs'] as List?) ?? const [];
-      if (legs.isNotEmpty) {
-        final firstLeg = legs.first as Map<String, dynamic>;
-        _distanceMeters = (firstLeg['distance']?['value'] as num?)?.toDouble();
-        _durationSeconds = (firstLeg['duration']?['value'] as num?)?.toInt();
-      }
-
-      _routePoints = _decodePolyline(points);
-      return _routePoints.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  String _googleStatusToMessage(String status) {
-    switch (status) {
-      case 'ZERO_RESULTS':
-        return 'No hay ruta vial disponible para ese destino';
-      case 'REQUEST_DENIED':
-      case 'OVER_DAILY_LIMIT':
-      case 'OVER_QUERY_LIMIT':
-        return 'Google Directions rechazó la solicitud (revisa API key y facturacion)';
-      case 'INVALID_REQUEST':
-        return 'Solicitud inválida al calcular la ruta';
-      default:
-        return 'No se pudo calcular una ruta real por calles';
-    }
   }
 
   void startNavigation() {
