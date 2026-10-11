@@ -1,3 +1,4 @@
+import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
@@ -6,12 +7,27 @@ import 'providers/backpacks_provider.dart';
 import 'providers/map_navigation_provider.dart';
 import 'providers/mensajes_provider.dart';
 import 'services/location_tracking_service.dart';
+import 'services/reporte_errores_service.dart';
 import 'utils/app_theme.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/login/login_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Errores no controlados → monitoreo de NEXT OS LITE. Se conserva el manejo de siempre
+  // (presentError / return false): solo se agrega el reporte.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    ReporteErroresService.reportar(
+      mensaje: details.exceptionAsString(),
+      stack: details.stack?.toString(),
+      pantalla: details.library,
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ReporteErroresService.reportar(mensaje: error.toString(), stack: stack.toString());
+    return false;
+  };
   // Inicializar el foreground task service una sola vez al arrancar.
   LocationTrackingService.init();
   runApp(const LogimarketApp());

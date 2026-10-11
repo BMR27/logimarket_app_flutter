@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'reporte_errores_service.dart';
 
 /// Servicio HTTP base con inyección automática del JWT en cada request.
 class ApiService {
@@ -52,9 +53,18 @@ class ApiService {
     return results.any((r) => r != ConnectivityResult.none);
   }
 
-  Future<Never> _throwNetworkException(Object e) async {
+  Future<Never> _throwNetworkException(Object e, [String? url, String? metodo]) async {
     final hasInterface = await _hasNetworkInterface();
     if (e is TimeoutException) {
+      // Con conexión y sin respuesta en el tiempo límite: el servidor no responde → monitoreo
+      if (hasInterface && url != null) {
+        ReporteErroresService.reportar(
+          tipo: 'lento',
+          mensaje: 'El servidor no respondió a tiempo',
+          ruta: ReporteErroresService.rutaDe(url),
+          metodo: metodo,
+        );
+      }
       throw ApiException(statusCode: 408, message: 'El servidor no responde');
     }
     if (!hasInterface) {
@@ -72,7 +82,7 @@ class ApiService {
     } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
-      await _throwNetworkException(e);
+      await _throwNetworkException(e, url, 'GET');
     } on http.ClientException catch (e) {
       await _throwNetworkException(e);
     }
@@ -91,7 +101,7 @@ class ApiService {
     } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
-      await _throwNetworkException(e);
+      await _throwNetworkException(e, url, 'POST');
     } on http.ClientException catch (e) {
       await _throwNetworkException(e);
     }
@@ -106,7 +116,7 @@ class ApiService {
     } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
-      await _throwNetworkException(e);
+      await _throwNetworkException(e, url, 'PUT');
     } on http.ClientException catch (e) {
       await _throwNetworkException(e);
     }
@@ -121,7 +131,7 @@ class ApiService {
     } on IOException catch (e) {
       await _throwNetworkException(e);
     } on TimeoutException catch (e) {
-      await _throwNetworkException(e);
+      await _throwNetworkException(e, url, 'DELETE');
     } on http.ClientException catch (e) {
       await _throwNetworkException(e);
     }
